@@ -28,6 +28,7 @@ private slots:
 
 private:
     void buildUi();
+    void onListActivated(QListWidgetItem* item);
     void rebuildWorkspaceBar(const OverviewSnapshot& snapshot);
     void rebuildWindowList(const OverviewSnapshot& snapshot);
     void updateStatus(const QString& text, bool isError = false);

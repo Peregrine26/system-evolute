@@ -1,6 +1,6 @@
 # C 模块 · 第一批代码讲解卡
 
-> 分支 `c/ui-skeleton`。这批代码**尚未编译验证**（开发机还没装 Qt），第一次构建的意义就是把它们跑通。
+> 分支 `c/ui-skeleton`。**已在 MSVC 14.44 + Qt 6.8.3 下编译通过，并用离屏模式冒烟启动成功。**
 
 ## 本次提交了什么
 
@@ -12,6 +12,19 @@
 | `src/ui/overview_window.*` | 顶部条 + 左侧列表 + 底部状态 | 真正的界面 |
 | `CMakeLists.txt` | 加 `CMAKE_AUTOMOC`、加源文件、加 include 路径 | 见下 |
 | `src/app/main.cpp` | 装假服务、开总览窗口 | 19 行的空壳被替换 |
+
+## 构建与验证记录
+
+工具链：MSVC 14.44.35207（`D:\VS\vs`）、Qt 6.8.3 `msvc2022_64`（`D:\Qt`）、Windows SDK 10.0.26100。
+
+```powershell
+cmake -S . -B build -DCMAKE_PREFIX_PATH="D:/Qt/6.8.3/msvc2022_64"
+cmake --build build
+```
+
+首次编译抓到 1 个真实错误：`onListActivated` 在 `.cpp` 里实现但没在 `.h` 里声明，报 `C2039 不是成员`，并连带把该函数体内所有成员变量报成未声明。补上声明后全部目标（含原有 `crossdesk_window_scanner`）编译通过。
+
+冒烟验证：`QT_QPA_PLATFORM=offscreen crossdesk.exe` 持续运行 4 秒无退出，说明 `QApplication` 启动、窗口构造、信号连接都没问题。**真机视觉效果仍需你自己看。**
 
 ## 四个必须能讲清的点
 
