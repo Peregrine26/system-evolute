@@ -49,7 +49,9 @@ struct WorkspaceItem {
 struct OverviewSnapshot {
     QVector<WorkspaceItem> workspaces;
     WorkspaceId currentWorkspaceId;
-    QVector<WindowItem> currentWindows;  // 仅当前 Workspace 的窗口，顺序由 B 决定
+    // 全部窗口，不只是当前工作区的。UI 按 workspaceId 过滤出当前页，
+    // 这样"窗口消失了"和"窗口被挪到别的工作区了"才能区分开。
+    QVector<WindowItem> windows;
 };
 
 }  // namespace crossdesk::ui

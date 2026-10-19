@@ -2,12 +2,15 @@
 
 #include "workspace_service.h"
 
+#include <QAction>
 #include <QButtonGroup>
 #include <QHBoxLayout>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLayoutItem>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QMenu>
 #include <QPushButton>
 #include <QStringList>
 #include <QVariant>
@@ -21,12 +24,8 @@ constexpr int kWindowIdRole = Qt::UserRole + 1;
 QString describe(const WindowItem& window) {
     QStringList parts;
     parts << window.appName;
-    switch (window.control) {
-        case ControlState::Manageable:
-            break;
-        case ControlState::Restricted:
-            parts << QStringLiteral("受限");
-            break;
+    if (window.control == ControlState::Restricted) {
+        parts << QStringLiteral("受限");
     }
     switch (window.visibility) {
         case Visibility::Visible:
@@ -70,6 +69,7 @@ void OverviewWindow::buildUi() {
         "QPushButton[role=\"action\"] {"
         "  background: #ffffff; border: 1px solid #d2d2d7; border-radius: 8px;"
         "  padding: 6px 14px; }"
+        "QPushButton[role=\"action\"]:disabled { color: #b0b0b5; }"
         "QListWidget { background: #ffffff; border: 1px solid #d2d2d7;"
         "  border-radius: 12px; outline: none; }"
         "QListWidget::item { padding: 10px 12px; border-bottom: 1px solid #f0f0f2; }"
@@ -80,12 +80,11 @@ void OverviewWindow::buildUi() {
     root->setSpacing(16);
 
     // ---- 顶部：Workspace 条 ----
-    auto* workspaceBar = new QHBoxLayout();
-    workspaceBar->setSpacing(12);
-    m_workspaceLayout = workspaceBar;
+    m_workspaceLayout = new QHBoxLayout();
+    m_workspaceLayout->setSpacing(12);
     m_workspaceGroup = new QButtonGroup(this);
     m_workspaceGroup->setExclusive(true);
-    root->addLayout(workspaceBar);
+    root->addLayout(m_workspaceLayout);
 
     // ---- 中部：左侧窗口列表 + 右侧占位 ----
     auto* body = new QHBoxLayout();
@@ -95,8 +94,9 @@ void OverviewWindow::buildUi() {
     m_windowList->setFixedWidth(380);
     m_windowList->setFocusPolicy(Qt::StrongFocus);
     m_windowList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    connect(m_windowList, &QListWidget::currentItemChanged, this,
+            &OverviewWindow::onSelectionChanged);
     connect(m_windowList, &QListWidget::itemActivated, this, &OverviewWindow::onListActivated);
-    connect(m_windowList, &QListWidget::itemClicked, this, &OverviewWindow::onListActivated);
     body->addWidget(m_windowList);
 
     auto* placeholder = new QLabel(QStringLiteral("缩略图区域（后续增强，先不做）"), this);
@@ -111,6 +111,14 @@ void OverviewWindow::buildUi() {
     m_statusLabel = new QLabel(this);
     m_statusLabel->setStyleSheet(QStringLiteral("color:#6e6e73;"));
     footer->addWidget(m_statusLabel, 1);
+
+    m_moveButton = new QPushButton(QStringLiteral("移到其他工作区"), this);
+    m_moveButton->setProperty("role", "action");
+    m_moveButton->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_M));
+    m_moveButton->setToolTip(QStringLiteral("Ctrl+M"));
+    m_moveButton->setEnabled(false);
+    connect(m_moveButton, &QPushButton::clicked, this, &OverviewWindow::onMoveRequested);
+    footer->addWidget(m_moveButton);
 
     auto* retry = new QPushButton(QStringLiteral("重试失败项"), this);
     retry->setProperty("role", "action");
@@ -129,18 +137,24 @@ void OverviewWindow::buildUi() {
 }
 
 void OverviewWindow::applySnapshot(const OverviewSnapshot& snapshot) {
+    m_lastSnapshot = snapshot;
+
     rebuildWorkspaceBar(snapshot);
     rebuildWindowList(snapshot);
 
     QString currentName;
+    int currentCount = 0;
     for (const WorkspaceItem& workspace : snapshot.workspaces) {
         if (workspace.id == snapshot.currentWorkspaceId) {
             currentName = workspace.name;
         }
     }
-    updateStatus(QStringLiteral("当前：%1 · %2 个窗口")
-                     .arg(currentName)
-                     .arg(snapshot.currentWindows.size()));
+    for (const WindowItem& window : snapshot.windows) {
+        if (window.workspaceId == snapshot.currentWorkspaceId) {
+            ++currentCount;
+        }
+    }
+    updateStatus(QStringLiteral("当前：%1 · %2 个窗口").arg(currentName).arg(currentCount));
 }
 
 void OverviewWindow::rebuildWorkspaceBar(const OverviewSnapshot& snapshot) {
@@ -173,18 +187,13 @@ void OverviewWindow::rebuildWorkspaceBar(const OverviewSnapshot& snapshot) {
 void OverviewWindow::rebuildWindowList(const OverviewSnapshot& snapshot) {
     const WindowId previouslySelected = m_hasSelection ? m_selectedWindow : 0;
 
-    m_windowList->clear();
-
-    if (snapshot.currentWindows.isEmpty()) {
-        auto* empty = new QListWidgetItem(QStringLiteral("这个 Workspace 还没有窗口"));
-        empty->setFlags(Qt::NoItemFlags);
-        m_windowList->addItem(empty);
-        m_hasSelection = false;
-        return;
-    }
+    m_windowList->clear();  // 会触发 currentItemChanged，把选中状态清掉
 
     QListWidgetItem* toSelect = nullptr;
-    for (const WindowItem& window : snapshot.currentWindows) {
+    for (const WindowItem& window : snapshot.windows) {
+        if (window.workspaceId != snapshot.currentWorkspaceId) {
+            continue;
+        }
         QString text = window.title.isEmpty() ? QStringLiteral("（无标题窗口）") : window.title;
         text += QStringLiteral("\n") + describe(window);
         if (!window.failureMessage.isEmpty()) {
@@ -200,17 +209,58 @@ void OverviewWindow::rebuildWindowList(const OverviewSnapshot& snapshot) {
         }
     }
 
+    if (m_windowList->count() == 0) {
+        auto* empty = new QListWidgetItem(QStringLiteral("这个 Workspace 还没有窗口"));
+        empty->setFlags(Qt::NoItemFlags);
+        m_windowList->addItem(empty);
+        m_hasSelection = false;
+        m_selectedWindow = 0;
+        updateSelectionUi();
+        return;
+    }
+
     if (toSelect) {
         m_windowList->setCurrentItem(toSelect);
         return;
     }
 
-    // 之前选中的窗口已经不在了：清除选择，并且不要把下一条命令转给相邻窗口。
-    if (m_hasSelection) {
+    if (previouslySelected == 0) {
+        return;
+    }
+
+    // 之前选中的窗口不在当前页了：先判断它是被挪走了还是被关掉了。
+    // 这两种情况必须给不同的提示，否则用户会以为窗口丢了。
+    m_hasSelection = false;
+    m_selectedWindow = 0;
+    updateSelectionUi();
+
+    QString movedTo;
+    for (const WindowItem& window : snapshot.windows) {
+        if (window.id == previouslySelected) {
+            for (const WorkspaceItem& workspace : snapshot.workspaces) {
+                if (workspace.id == window.workspaceId) {
+                    movedTo = workspace.name;
+                }
+            }
+        }
+    }
+    if (movedTo.isEmpty()) {
+        updateStatus(QStringLiteral("选中的窗口已经关闭，选择已清除。"), true);
+    } else {
+        updateStatus(QStringLiteral("窗口已移到「%1」，不再显示在这一页。").arg(movedTo));
+    }
+}
+
+void OverviewWindow::onSelectionChanged(QListWidgetItem* current, QListWidgetItem*) {
+    const QVariant data = current ? current->data(kWindowIdRole) : QVariant();
+    if (!data.isValid()) {
         m_hasSelection = false;
         m_selectedWindow = 0;
-        updateStatus(QStringLiteral("选中的窗口已经关闭，选择已清除。"), true);
+    } else {
+        m_hasSelection = true;
+        m_selectedWindow = static_cast<WindowId>(data.toULongLong());
     }
+    updateSelectionUi();
 }
 
 void OverviewWindow::onListActivated(QListWidgetItem* item) {
@@ -221,10 +271,39 @@ void OverviewWindow::onListActivated(QListWidgetItem* item) {
     if (!data.isValid()) {
         return;  // 空列表占位项
     }
-    const auto id = static_cast<WindowId>(data.toULongLong());
-    m_selectedWindow = id;
-    m_hasSelection = true;
-    m_service->activateWindow(id);
+    m_service->activateWindow(static_cast<WindowId>(data.toULongLong()));
+}
+
+void OverviewWindow::onMoveRequested() {
+    if (!m_hasSelection) {
+        updateStatus(QStringLiteral("先选中一个窗口，再移动。"), true);
+        return;
+    }
+
+    QMenu menu(this);
+    for (const WorkspaceItem& workspace : m_lastSnapshot.workspaces) {
+        if (workspace.id == m_lastSnapshot.currentWorkspaceId) {
+            continue;
+        }
+        QAction* action = menu.addAction(QStringLiteral("移动到「%1」").arg(workspace.name));
+        action->setData(workspace.id);
+    }
+
+    if (menu.isEmpty()) {
+        updateStatus(QStringLiteral("只有一个工作区，没有可移动的目标。"), true);
+        return;
+    }
+
+    const QPoint anchor = m_moveButton->mapToGlobal(QPoint(0, m_moveButton->height()));
+    QAction* chosen = menu.exec(anchor);
+    if (!chosen) {
+        return;
+    }
+    m_service->moveWindowToWorkspace(m_selectedWindow, chosen->data().toString());
+}
+
+void OverviewWindow::updateSelectionUi() {
+    m_moveButton->setEnabled(m_hasSelection);
 }
 
 void OverviewWindow::onOperationFinished(WindowId, bool success, const QString& message) {

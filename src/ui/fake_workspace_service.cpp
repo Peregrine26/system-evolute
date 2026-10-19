@@ -44,11 +44,7 @@ OverviewSnapshot FakeWorkspaceService::snapshot() const {
     OverviewSnapshot result;
     result.workspaces = m_workspaces;
     result.currentWorkspaceId = m_current;
-    for (const WindowItem& window : m_windows) {
-        if (window.workspaceId == m_current) {
-            result.currentWindows.push_back(window);
-        }
-    }
+    result.windows = m_windows;
     return result;
 }
 

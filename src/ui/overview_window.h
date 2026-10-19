@@ -9,6 +9,7 @@ class QHBoxLayout;
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
+class QPushButton;
 
 namespace crossdesk::ui {
 
@@ -28,9 +29,12 @@ private slots:
 
 private:
     void buildUi();
-    void onListActivated(QListWidgetItem* item);
     void rebuildWorkspaceBar(const OverviewSnapshot& snapshot);
     void rebuildWindowList(const OverviewSnapshot& snapshot);
+    void onSelectionChanged(QListWidgetItem* current, QListWidgetItem* previous);
+    void onListActivated(QListWidgetItem* item);
+    void onMoveRequested();
+    void updateSelectionUi();
     void updateStatus(const QString& text, bool isError = false);
 
     WorkspaceService* m_service = nullptr;
@@ -39,6 +43,10 @@ private:
     QButtonGroup* m_workspaceGroup = nullptr;
     QListWidget* m_windowList = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QPushButton* m_moveButton = nullptr;
+
+    // 最近一次收到的快照副本。界面只读它，不拿它当第二份真相。
+    OverviewSnapshot m_lastSnapshot;
 
     WindowId m_selectedWindow = 0;
     bool m_hasSelection = false;
