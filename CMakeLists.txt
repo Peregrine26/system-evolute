@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Qt 的 signals/slots 需要 moc 预处理器。没有这一行，Q_OBJECT 类会在链接阶段
+# 报 "undefined reference to vtable"，这是 Qt 新手第一个必踩的坑。
+set(CMAKE_AUTOMOC ON)
+
 option(CROSSDESK_BUILD_GUI "Build the Qt desktop application" ON)
 option(CROSSDESK_BUILD_SCANNER "Build the Windows scanner example" ${WIN32})
 
@@ -14,7 +18,14 @@ if(CROSSDESK_BUILD_GUI)
 
     add_executable(crossdesk WIN32
         src/app/main.cpp
+        src/ui/overview_window.cpp
+        src/ui/overview_window.h
+        src/ui/workspace_service.h
+        src/ui/fake_workspace_service.cpp
+        src/ui/fake_workspace_service.h
+        src/ui/overview_types.h
     )
+    target_include_directories(crossdesk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(crossdesk PRIVATE Qt6::Widgets)
 endif()
 
