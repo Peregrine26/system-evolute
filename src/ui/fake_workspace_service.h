@@ -24,7 +24,11 @@ public:
     void simulateWindowClosed(WindowId window);
     void simulateOperationFailure(WindowId window, const QString& message);
 
+    // 恢复初始的 2 个 Workspace / 6 个窗口，用于反复演示。
+    void reset();
+
 private:
+    void seedData();
     void rebuildCounts();
     void notify();
     WindowItem* findWindow(WindowId window);

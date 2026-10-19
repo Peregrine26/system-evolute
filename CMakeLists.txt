@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(CrossDesk VERSION 0.1.0 LANGUAGES CXX)
 
+enable_testing()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -12,21 +14,33 @@ set(CMAKE_AUTOMOC ON)
 
 option(CROSSDESK_BUILD_GUI "Build the Qt desktop application" ON)
 option(CROSSDESK_BUILD_SCANNER "Build the Windows scanner example" ${WIN32})
+option(CROSSDESK_BUILD_UI_SMOKE "Build the headless UI smoke test" ON)
 
 if(CROSSDESK_BUILD_GUI)
     find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
 
-    add_executable(crossdesk WIN32
-        src/app/main.cpp
-        src/ui/overview_window.cpp
-        src/ui/overview_window.h
+    # UI 单独成库，这样交付程序和无界面冒烟测试编译的是同一份代码。
+    add_library(crossdesk_ui STATIC
+        src/ui/overview_types.h
         src/ui/workspace_service.h
         src/ui/fake_workspace_service.cpp
         src/ui/fake_workspace_service.h
-        src/ui/overview_types.h
+        src/ui/overview_window.cpp
+        src/ui/overview_window.h
     )
-    target_include_directories(crossdesk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(crossdesk PRIVATE Qt6::Widgets)
+    target_include_directories(crossdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(crossdesk_ui PUBLIC Qt6::Widgets)
+
+    add_executable(crossdesk WIN32
+        src/app/main.cpp
+    )
+    target_link_libraries(crossdesk PRIVATE crossdesk_ui)
+
+    if(CROSSDESK_BUILD_UI_SMOKE)
+        add_executable(crossdesk_ui_smoke tests/ui_smoke.cpp)
+        target_link_libraries(crossdesk_ui_smoke PRIVATE crossdesk_ui)
+        add_test(NAME ui_smoke COMMAND crossdesk_ui_smoke)
+    endif()
 endif()
 
 # This target exposes only platform-neutral headers to future core modules.

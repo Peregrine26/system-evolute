@@ -14,6 +14,15 @@ FakeWorkspaceService::FakeWorkspaceService(QObject* parent)
     // 否则运行时只会打印 "Cannot queue arguments of type" 然后信号被丢掉。
     qRegisterMetaType<OverviewSnapshot>("crossdesk::ui::OverviewSnapshot");
 
+    seedData();
+}
+
+void FakeWorkspaceService::reset() {
+    seedData();
+    notify();
+}
+
+void FakeWorkspaceService::seedData() {
     // 两个 Workspace，六个窗口，故意包含三种"麻烦情况"：
     // 用户自己最小化的窗口、受限窗口、以及稍后会被外部关闭的窗口。
     m_workspaces = {
