@@ -78,3 +78,18 @@ if(CROSSDESK_BUILD_SCANNER)
         crossdesk_win32_backend
     )
 endif()
+
+# 只读实时数据源：把 A 的扫描器接到界面上，显示真实窗口。
+# 只做查询，不做隐藏/恢复/置前，因此不越 A、B 的边界。
+if(CROSSDESK_BUILD_GUI AND WIN32 AND CROSSDESK_BUILD_SCANNER)
+    target_sources(crossdesk_ui PRIVATE
+        src/ui/live_workspace_service.cpp
+        src/ui/live_workspace_service.h
+    )
+    target_link_libraries(crossdesk_ui PUBLIC
+        crossdesk_window_scanner_lib
+        crossdesk_win32_backend
+    )
+    # PUBLIC：main.cpp 也要看见这个宏才知道 --live 是否可用
+    target_compile_definitions(crossdesk_ui PUBLIC CROSSDESK_HAS_LIVE_SCANNER=1)
+endif()
