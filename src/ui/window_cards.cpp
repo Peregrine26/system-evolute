@@ -299,30 +299,25 @@ void CardStack::paintEvent(QPaintEvent*) {
     // 左栏自己一层底色，和右边的桌面画面分开，像任务栏挂在一块面板上。
     painter.fillRect(rect(), QColor(0x14, 0x17, 0x1c));
 
-    // ---- 每张卡背后的影子界面 ----
-    // 不是真实窗口，只是几张往右下错开的圆角板，垫在每张卡下面。
-    // 它的作用只有一个：让人看出这是一摞有厚度的窗口，不是一列列表行。
+    // ---- 只有第一张卡背后的影子界面 ----
+    // 不是真实窗口，只是几张往右下错开的圆角板，垫在第一张下面。
+    // 为什么只给第一张：它是这一摞里最上面那张，影子代表"它下面还压着一摞"。
+    // 四张都垫就成了四摞纸，反而看不出谁是这一摞的顶。
     // 画在父控件上，所以一定落在子控件（卡片）下面，只露出右边和下边两条边。
-    if (m_shadowLayers > 0) {
+    if (m_shadowLayers > 0 && !m_cards.isEmpty()) {
         painter.setRenderHint(QPainter::Antialiasing, true);
-        for (WindowCard* card : m_cards) {
-            if (!card->isVisible()) {
-                continue;
-            }
-            const QRect base = card->geometry();
-            // 由远及近画：最远的最暗、也最靠右下，近的压在它上面。
-            for (int i = m_shadowLayers; i >= 1; --i) {
-                const int offset = i * kShadowStep;
-                QPainterPath layer;
-                layer.addRoundedRect(QRectF(base).translated(offset, offset), kCardRadius,
-                                     kCardRadius);
-                // 亮度随层数递减：远处退进背景里，近的明显一点，叠出厚度。
-                const int tone = 0x21 + (m_shadowLayers - i) * 7;
-                painter.fillPath(layer, QColor(tone, tone + 5, tone + 11));
-                painter.setBrush(Qt::NoBrush);
-                painter.setPen(QPen(QColor(255, 255, 255, 30), 1));
-                painter.drawPath(layer);
-            }
+        const QRect base = m_cards.first()->geometry();
+        // 由远及近画：最远的最暗、也最靠右下，近的压在它上面。
+        for (int i = m_shadowLayers; i >= 1; --i) {
+            const int offset = i * kShadowStep;
+            QPainterPath layer;
+            layer.addRoundedRect(QRectF(base).translated(offset, offset), kCardRadius, kCardRadius);
+            // 亮度随层数递减：远处退进背景里，近的明显一点，叠出厚度。
+            const int tone = 0x21 + (m_shadowLayers - i) * 7;
+            painter.fillPath(layer, QColor(tone, tone + 5, tone + 11));
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(QColor(255, 255, 255, 30), 1));
+            painter.drawPath(layer);
         }
     }
 
@@ -355,12 +350,13 @@ void CardStack::relayout(bool animated) {
     m_stacked = count > kMaxTiled;
     m_compact = false;
 
-    // 平铺时每张卡都有影子，所以右边和下边各让出影子错开的那一条：
-    // 右侧不留，影子会顶到栏边被裁掉；下侧不留，最后一张的影子和栏底撞在一起。
-    // 四张统一让，宽高才一模一样——只让第一张的话，它会比下面三张窄一截。
+    // 上下也留出同样的边：贴着窗口边缘会被切掉圆角和边框，看起来像溢出而不是铺满。
+    const int inner = this->height() - kMargin * 2;
+
+    // 只有第一张有影子，但右边这一条是四张一起让的：
+    // 只给第一张缩，它会比下面三张窄一截，四张就不是同样的面积了。
     const int shadowRoom = (!m_stacked && count > 1) ? kShadowSpan : 0;
     const int width = this->width() - kMargin * 2 - shadowRoom;
-    const int inner = this->height() - kMargin * 2 - shadowRoom;
 
     int cardHeight = inner;
     int step = inner;
@@ -466,18 +462,14 @@ int CardStack::cardIndexAt(const QPoint& pos) const {
         }
     }
 
-    // 点在影子界面上：那不是别的窗口，就是那张卡垫出来的厚度，算点那张卡。
-    // 不认这块的话，每张卡右下角那一小片点了没反应，像坏了一样。
-    if (m_shadowLayers > 0) {
-        for (int i = 0; i < m_cards.size(); ++i) {
-            if (!m_cards.at(i)->isVisible()) {
-                continue;
-            }
-            const QRect shadow =
-                m_cards.at(i)->geometry().adjusted(0, 0, kShadowSpan, kShadowSpan);
-            if (shadow.contains(pos)) {
-                return i;
-            }
+    // 点在影子界面上：那不是另一个窗口，就是第一张卡垫出来的厚度，算点第一张。
+    // 不认这块的话，第一张右下角那一小片点了没反应，像坏了一样。
+    // 后面三张没有影子，它们的右侧就是栏底，点了不该选中任何东西。
+    if (m_shadowLayers > 0 && !m_cards.isEmpty()) {
+        const QRect shadow =
+            m_cards.first()->geometry().adjusted(0, 0, kShadowSpan, kShadowSpan);
+        if (shadow.contains(pos)) {
+            return 0;
         }
     }
     return -1;
