@@ -16,3 +16,22 @@ jobs:
         run: cmake --build build-platform --config Debug --parallel
       - name: Test layout integration without desktop operations
         run: ctest --test-dir build-platform -C Debug -R "^layout_executor_test$" --output-on-failure
+
+  qt:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt Widgets
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          archives: 'qtbase'
+          cache: 'true'
+      - name: Configure with Qt
+        run: cmake -S . -B build-qt -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=ON
+      - name: Build Qt applications and tests
+        run: cmake --build build-qt --config Debug --parallel
+      - name: Test without desktop operations
+        run: ctest --test-dir build-qt -C Debug -LE interactive-desktop --output-on-failure --no-tests=error
