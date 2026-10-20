@@ -5,7 +5,7 @@
 #include "window_row_delegate.h"
 
 #include <QButtonGroup>
-#include <QColor>
+#include <QCoreApplication>
 #include <QEasingCurve>
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
@@ -16,25 +16,30 @@
 #include <QPropertyAnimation>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QResizeEvent>
 #include <QShortcut>
 #include <QShowEvent>
-#include <QStackedWidget>
 #include <QStringList>
 #include <QTimer>
-#include <QVBoxLayout>
 #include <QVariant>
+#include <QWidget>
 
 namespace crossdesk::ui {
 
 namespace {
 
 constexpr int kWindowIdRole = Qt::UserRole + 1;
-constexpr int kOverviewPage = 0;
-constexpr int kPreviewPage = 1;
 
-// 左侧窗口列表的固定宽度。列表是"挑窗口"的控件，不需要跟着窗口变宽；
-// 右边承担"看窗口"，那部分才应该吃掉所有多余空间。
-constexpr int kListWidth = 340;
+// 左边任务栏的宽度。它是一个"条"，不该跟着屏幕无限变宽；
+// 但也不能在 1366 的笔记本屏上占掉三分之一，所以按屏幕宽度取比例再夹住。
+constexpr int kListMinWidth = 288;
+constexpr int kListMaxWidth = 400;
+
+// 行高的可用范围：太少看不清缩略图，太多一屏放不下几个窗口。
+// 上限给得比较宽，是为了让"只有三个窗口"的时候把整条任务栏铺满，
+// 而不是上面三行、下面一大片空。
+constexpr int kRowMinHeight = 76;
+constexpr int kRowMaxHeight = 260;
 
 }  // namespace
 
@@ -50,168 +55,114 @@ MainWindow::MainWindow(CrossDeskService* service, QWidget* parent)
 
 void MainWindow::buildUi() {
     setWindowTitle(QStringLiteral("CrossDesk"));
-    resize(1200, 760);
+    setObjectName(QStringLiteral("MainWindow"));
+    // 无边框 + 全屏：这块画面就是桌面本身，不跟用户抢标题栏和边框。
+    setWindowFlags(windowFlags() | Qt::FramelessWindowHint);
+    setMinimumSize(960, 600);
 
     setStyleSheet(QStringLiteral(
-        "QWidget { background:#f5f5f7; color:#1d1d1f; font-size:13px; }"
-        "QLabel[role=\"title\"] { font-size:19px; font-weight:700; }"
-        "QLabel[role=\"hint\"] { color:#86868b; }"
-        "QPushButton { background:#ffffff; border:1px solid #d2d2d7; border-radius:8px;"
-        "  padding:6px 16px; }"
-        "QPushButton:hover { border-color:#a1a1a6; }"
-        "QPushButton:disabled { color:#b0b0b5; border-color:#e3e3e8; }"
-        "QListWidget { background:#ffffff; border:1px solid #d2d2d7; border-radius:12px;"
-        "  outline:none; }"
-        "QListWidget::item { padding:8px 10px; border-bottom:1px solid #f0f0f2; }"
-        "QListWidget::item:selected { background:#e8f1fd; color:#1d1d1f; }"
-        "QRadioButton { background:transparent; }"));
+        "QWidget#MainWindow { background:#0f1114; }"
+        "QWidget { color:#e6e8ec; font-size:13px; }"
+        "QListWidget#windowList { background:#1a1c21; border:none;"
+        "  border-right:1px solid #262a31; outline:none; }"
+        "QListWidget#windowList::item { border:none; padding:0; margin:0; }"
+        "QPushButton { background:rgba(255,255,255,0.10); color:#f2f4f7;"
+        "  border:1px solid rgba(255,255,255,0.14); border-radius:9px;"
+        "  padding:7px 16px; font-size:13px; }"
+        "QPushButton:hover { background:rgba(255,255,255,0.17); }"
+        "QPushButton:pressed { background:rgba(255,255,255,0.24); }"
+        "QPushButton:disabled { color:#6b7078; background:rgba(255,255,255,0.04);"
+        "  border-color:rgba(255,255,255,0.06); }"
+        "QPushButton#confirmButton { background:#0a84ff; border-color:#0a84ff;"
+        "  color:#ffffff; font-weight:600; }"
+        "QPushButton#confirmButton:hover { background:#3d9bff; border-color:#3d9bff; }"
+        "QRadioButton { background:rgba(255,255,255,0.08); border-radius:8px;"
+        "  padding:6px 12px; color:#c9ced6; }"
+        "QRadioButton::indicator { image:none; width:0px; height:0px; margin:0px; }"
+        "QRadioButton:checked { background:rgba(255,255,255,0.22); color:#ffffff; }"
+        "QLabel#statusLabel { background:rgba(16,18,22,0.78);"
+        "  border:1px solid rgba(255,255,255,0.10); border-radius:9px;"
+        "  padding:5px 12px; color:#b9bfc8; font-size:12px; }"));
 
-    auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(20, 16, 20, 14);
-    root->setSpacing(12);
+    auto* root = new QHBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
 
-    auto* header = new QHBoxLayout();
-    auto* title = new QLabel(QStringLiteral("CrossDesk"), this);
-    title->setProperty("role", "title");
-    auto* hint = new QLabel(QStringLiteral("窗口总览 · 定位或左右排列"), this);
-    hint->setProperty("role", "hint");
-    header->addWidget(title);
-    header->addSpacing(10);
-    header->addWidget(hint);
-    header->addStretch(1);
-    root->addLayout(header);
+    // ---- 左：任务栏 ----
+    m_list = new QListWidget(this);
+    m_list->setObjectName(QStringLiteral("windowList"));
+    m_list->setFocusPolicy(Qt::StrongFocus);
+    m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_list->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_list->setFrameShape(QFrame::NoFrame);
+    m_list->setItemDelegate(new WindowRowDelegate(m_list));
+    m_list->setUniformItemSizes(false);
+    m_list->setFixedWidth(kListMaxWidth);
+    connect(m_list, &QListWidget::itemChanged, this, &MainWindow::onItemChanged);
+    // 回车 / 双击都落到同一条"定位"路径上。
+    connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem*) { onActivate(); });
+    root->addWidget(m_list, 0);
 
-    m_pages = new QStackedWidget(this);
-    m_pages->setObjectName(QStringLiteral("pages"));
-    m_pages->addWidget(buildOverviewPage());
-    m_pages->addWidget(buildPreviewPage());
+    // ---- 右：主屏幕画面 ----
+    m_canvas = new LayoutPreview(this);
+    m_canvas->setObjectName(QStringLiteral("screenPreview"));
+    // 换桌面 / 换排列都靠这个透明度效果做过渡，两段动画里的第二段就落在这里。
+    m_sceneEffect = new QGraphicsOpacityEffect(m_canvas);
+    m_sceneEffect->setOpacity(1.0);
+    m_canvas->setGraphicsEffect(m_sceneEffect);
+    root->addWidget(m_canvas, 1);
 
-    // 换页动画靠这个透明度效果，两个页面共用同一个，避免切换时闪烁。
-    m_pageEffect = new QGraphicsOpacityEffect(m_pages);
-    m_pageEffect->setOpacity(1.0);
-    m_pages->setGraphicsEffect(m_pageEffect);
+    // ---- 浮层：操作条 + 状态 ----
+    m_actionBar = new QWidget(this);
+    m_actionBar->setObjectName(QStringLiteral("actionBar"));
+    auto* bar = new QHBoxLayout(m_actionBar);
+    bar->setContentsMargins(0, 0, 0, 0);
+    bar->setSpacing(8);
 
-    root->addWidget(m_pages, 1);
+    m_activateButton = new QPushButton(QStringLiteral("定位"), m_actionBar);
+    m_activateButton->setObjectName(QStringLiteral("activateButton"));
+    m_activateButton->setToolTip(QStringLiteral("Enter"));
+    connect(m_activateButton, &QPushButton::clicked, this, &MainWindow::onActivate);
+    bar->addWidget(m_activateButton);
+
+    m_equalRadio = new QRadioButton(QStringLiteral("等宽"), m_actionBar);
+    m_equalRadio->setObjectName(QStringLiteral("modeEqual"));
+    m_equalRadio->setChecked(true);
+    m_equalRadio->setToolTip(QStringLiteral("两窗各占一半"));
+    m_masterRadio = new QRadioButton(QStringLiteral("左 60 / 右 40"), m_actionBar);
+    m_masterRadio->setObjectName(QStringLiteral("modeLeftMaster"));
+    m_masterRadio->setToolTip(QStringLiteral("左边主窗口更宽"));
+
+    auto* group = new QButtonGroup(m_actionBar);
+    group->addButton(m_equalRadio);
+    group->addButton(m_masterRadio);
+    connect(m_equalRadio, &QRadioButton::toggled, this, &MainWindow::onModeChanged);
+    bar->addWidget(m_equalRadio);
+    bar->addWidget(m_masterRadio);
+
+    m_backButton = new QPushButton(QStringLiteral("返回"), m_actionBar);
+    m_backButton->setObjectName(QStringLiteral("backButton"));
+    m_backButton->setToolTip(QStringLiteral("Esc"));
+    connect(m_backButton, &QPushButton::clicked, this, &MainWindow::onBack);
+    bar->addWidget(m_backButton);
+
+    m_confirmButton = new QPushButton(QStringLiteral("确认排列"), m_actionBar);
+    m_confirmButton->setObjectName(QStringLiteral("confirmButton"));
+    m_confirmButton->setToolTip(QStringLiteral("Ctrl+Enter"));
+    connect(m_confirmButton, &QPushButton::clicked, this, &MainWindow::onConfirm);
+    bar->addWidget(m_confirmButton);
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
-    m_statusLabel->setWordWrap(true);
-    m_statusLabel->setMinimumHeight(20);
-    root->addWidget(m_statusLabel);
+    m_statusLabel->setWordWrap(false);
 
     // 应用内快捷键。注意 Enter 没有单独注册：QListWidget 自己会把回车解释成
     // "激活当前项"，再注册一个 QShortcut 会和它抢同一个按键，出现一次回车发两条命令。
     new QShortcut(QKeySequence(QStringLiteral("Ctrl+R")), this, [this] { onRefresh(); });
     new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), this, [this] { onConfirm(); });
     new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Enter), this, [this] { onConfirm(); });
-}
 
-QWidget* MainWindow::buildOverviewPage() {
-    auto* page = new QWidget(this);
-    auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(10);
-
-    auto* bar = new QHBoxLayout();
-    m_refreshButton = new QPushButton(QStringLiteral("刷新"), page);
-    m_refreshButton->setObjectName(QStringLiteral("refreshButton"));
-    m_refreshButton->setToolTip(QStringLiteral("Ctrl+R"));
-    connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefresh);
-    bar->addWidget(m_refreshButton);
-
-    m_activateButton = new QPushButton(QStringLiteral("定位"), page);
-    m_activateButton->setObjectName(QStringLiteral("activateButton"));
-    m_activateButton->setToolTip(QStringLiteral("勾选一个窗口后按 Enter"));
-    connect(m_activateButton, &QPushButton::clicked, this, &MainWindow::onActivate);
-    bar->addWidget(m_activateButton);
-
-    m_arrangeButton = new QPushButton(QStringLiteral("排列…"), page);
-    m_arrangeButton->setObjectName(QStringLiteral("arrangeButton"));
-    m_arrangeButton->setToolTip(QStringLiteral("勾选两个窗口后进入布局预览"));
-    connect(m_arrangeButton, &QPushButton::clicked, this, &MainWindow::onArrange);
-    bar->addWidget(m_arrangeButton);
-
-    bar->addStretch(1);
-    auto* counter = new QLabel(QStringLiteral("勾选最多两个窗口"), page);
-    counter->setProperty("role", "hint");
-    bar->addWidget(counter);
-    layout->addLayout(bar);
-
-    auto* body = new QHBoxLayout();
-    body->setSpacing(14);
-
-    m_list = new QListWidget(page);
-    m_list->setObjectName(QStringLiteral("windowList"));
-    m_list->setFocusPolicy(Qt::StrongFocus);
-    m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_list->setItemDelegate(new WindowRowDelegate(m_list));
-    m_list->setUniformItemSizes(true);
-    connect(m_list, &QListWidget::itemChanged, this, &MainWindow::onItemChanged);
-    // 回车 / 双击都落到同一条"定位"路径上，和按钮共用命令。
-    connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem*) { onActivate(); });
-    // 左边这一列就是"任务栏"：任务名 + 右边紧跟它自己的缩略图。
-    // 固定成一条窄栏，右侧整块空间留给主屏幕。
-    m_list->setFixedWidth(kListWidth);
-    body->addWidget(m_list, 0);
-
-    // 右侧 = 主屏幕：一整块缩小版的桌面，勾选的窗口按目标位置实时摆进去。
-    // 不选窗口时它就是一块空的可用区域，不会凭空出现两个卡片。
-    auto* screenColumn = new QVBoxLayout();
-    screenColumn->setSpacing(8);
-    auto* caption = new QLabel(QStringLiteral("主屏幕"), page);
-    caption->setProperty("role", "hint");
-    screenColumn->addWidget(caption);
-    m_screenPreview = new LayoutPreview(page);
-    m_screenPreview->setObjectName(QStringLiteral("screenPreview"));
-    screenColumn->addWidget(m_screenPreview, 1);
-    body->addLayout(screenColumn, 1);
-
-    layout->addLayout(body, 1);
-    return page;
-}
-
-QWidget* MainWindow::buildPreviewPage() {
-    auto* page = new QWidget(this);
-    auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(10);
-
-    auto* bar = new QHBoxLayout();
-    m_backButton = new QPushButton(QStringLiteral("返回"), page);
-    m_backButton->setObjectName(QStringLiteral("backButton"));
-    m_backButton->setToolTip(QStringLiteral("Esc"));
-    connect(m_backButton, &QPushButton::clicked, this, &MainWindow::onBack);
-    bar->addWidget(m_backButton);
-    bar->addStretch(1);
-
-    m_equalRadio = new QRadioButton(QStringLiteral("等宽"), page);
-    m_equalRadio->setObjectName(QStringLiteral("modeEqual"));
-    m_equalRadio->setChecked(true);
-    m_masterRadio = new QRadioButton(QStringLiteral("左侧主窗口 60/40"), page);
-    m_masterRadio->setObjectName(QStringLiteral("modeLeftMaster"));
-
-    auto* group = new QButtonGroup(page);
-    group->addButton(m_equalRadio);
-    group->addButton(m_masterRadio);
-    connect(m_equalRadio, &QRadioButton::toggled, this, &MainWindow::onModeChanged);
-
-    bar->addWidget(m_equalRadio);
-    bar->addSpacing(12);
-    bar->addWidget(m_masterRadio);
-    bar->addSpacing(16);
-
-    m_confirmButton = new QPushButton(QStringLiteral("确认排列"), page);
-    m_confirmButton->setObjectName(QStringLiteral("confirmButton"));
-    m_confirmButton->setToolTip(QStringLiteral("Ctrl+Enter"));
-    connect(m_confirmButton, &QPushButton::clicked, this, &MainWindow::onConfirm);
-    bar->addWidget(m_confirmButton);
-
-    layout->addLayout(bar);
-
-    m_preview = new LayoutPreview(page);
-    m_preview->setObjectName(QStringLiteral("previewCanvas"));
-    layout->addWidget(m_preview, 1);
-    return page;
+    updateActionStates();
 }
 
 void MainWindow::connectService() {
@@ -246,9 +197,15 @@ void MainWindow::applyWindows() {
         }
     }
 
+    // 正在排列预览时，如果其中一个窗口被关掉，就没得排了，退回桌面视图。
+    if (m_arranging && m_checked.size() < 2) {
+        m_arranging = false;
+        m_placements.clear();
+    }
+
     rebuildList();
     updateActionStates();
-    updateThumbnails();
+    updateScene();
 
     if (lostSelection) {
         // 这条比"已刷新，共 N 个窗口"重要得多，所以用标记保护它不被覆盖。
@@ -281,13 +238,41 @@ void MainWindow::rebuildList() {
 
     if (m_windows.isEmpty()) {
         auto* empty = new QListWidgetItem(m_list);
-        empty->setText(QStringLiteral(
-            "没有可管理的窗口。\n点「刷新」重试；若一直为空，说明平台扫描还没就绪。"));
+        empty->setText(QStringLiteral("没有可管理的窗口"));
         empty->setFlags(Qt::NoItemFlags);
-        empty->setForeground(QColor(QStringLiteral("#86868b")));
+        empty->setForeground(QColor(QStringLiteral("#6b7078")));
+        empty->setSizeHint(QSize(m_list->viewport()->width(), 48));
     }
 
     m_syncingChecks = false;
+    fitRows();
+}
+
+void MainWindow::fitRows() {
+    // 让窗口少的时候行高一点、缩略图大一点，别让任务栏上面三行、下面全空。
+    const int viewportHeight = m_list->viewport()->height();
+    if (viewportHeight <= 0) {
+        return;
+    }
+
+    int count = 0;
+    for (int row = 0; row < m_list->count(); ++row) {
+        if (m_list->item(row)->data(kWindowIdRole).isValid()) {
+            ++count;
+        }
+    }
+    if (count == 0) {
+        return;
+    }
+
+    const int height = qBound(kRowMinHeight, viewportHeight / count, kRowMaxHeight);
+    const int width = m_list->viewport()->width();
+    for (int row = 0; row < m_list->count(); ++row) {
+        QListWidgetItem* item = m_list->item(row);
+        if (item->data(kWindowIdRole).isValid()) {
+            item->setSizeHint(QSize(width, height));
+        }
+    }
 }
 
 void MainWindow::refreshRow(WindowId id) {
@@ -336,58 +321,79 @@ void MainWindow::onItemChanged(QListWidgetItem* item) {
         m_checked.push_back(id);
     } else {
         m_checked.removeAll(id);
+        if (m_arranging) {
+            // 在排列画面里取消勾选：没有两个窗口就没得排，直接退回桌面。
+            m_arranging = false;
+            m_placements.clear();
+        }
     }
 
     updateActionStates();
-    updateThumbnails();
+    if (m_arranging) {
+        // 已经在排列画面里：勾选变了（比如勾第三个把最早的替换掉），
+        // 直接把画面换成新的一对，不做淡入淡出——用户刚点的就是这件事。
+        if (m_checked.size() == 2 && buildPlacements()) {
+            updateScene();
+        }
+        return;
+    }
+    updateScene();
+
+    // 勾满两个窗口就自动把画面切到"排完之后的样子"——用户不用先找按钮，
+    // 勾完就看见结果，这正是这个工具要说的话。
+    if (m_checked.size() == 2) {
+        enterArrangement();
+    }
 }
 
 void MainWindow::updateActionStates() {
     const int count = m_checked.size();
-    m_activateButton->setEnabled(count == 1);
-    m_arrangeButton->setEnabled(count == 2);
-    m_confirmButton->setEnabled(count == 2 && m_placements.size() == 2);
+    const bool arranging = m_arranging;
+    const bool showActivate = !arranging && count == 1;
+
+    m_activateButton->setVisible(showActivate);
+    m_activateButton->setEnabled(showActivate && !m_animating);
+
+    m_equalRadio->setVisible(arranging);
+    m_masterRadio->setVisible(arranging);
+    m_backButton->setVisible(arranging);
+    m_backButton->setEnabled(!m_animating);
+    m_confirmButton->setVisible(arranging);
+    m_confirmButton->setEnabled(arranging && m_placements.size() == 2 && !m_animating);
+
+    // 操作条的显隐要由"该显示什么"直接算出来，不能拿子控件的 isVisible():
+    // 父控件自己隐藏着的时候，子控件的 isVisible() 一律返回 false。
+    m_actionBar->setVisible(showActivate || arranging);
+    m_actionBar->adjustSize();
+    layoutOverlay();
 }
 
-void MainWindow::updateThumbnails() {
-    // 右侧主屏幕按"勾选了什么"实时反映目标布局：
-    // 没勾 → 一块空屏；勾 1 个 → 占满可用区域；勾 2 个 → 左右各一块。
-    //
-    // 这里只做"预览"，不发命令。用户要先在屏幕上看到结果，再决定是否确认排列。
-    if (m_screenPreview == nullptr) {
+void MainWindow::updateScene() {
+    // 右侧画面只有两种内容：桌面现在的样子 / 排完之后的样子。
+    // 都由 LayoutPreview 画，界面这一层不重复算位置。
+    if (m_arranging && m_placements.size() == 2) {
+        m_canvas->showArrangement(m_service->workArea(), m_placements, m_windows);
         return;
     }
-    if (m_checked.isEmpty()) {
-        // 传空 placements 而不是 clear()：clear 会把可用区域一起丢掉，
-        // 空屏上就只能画兜底的 1920×1080，和真实可用区域对不上。
-        m_screenPreview->setPlacements(m_service->workArea(), {}, m_windows);
-        return;
-    }
+    m_canvas->showDesktop(m_service->workArea(), m_windows, m_checked);
+}
 
-    if (m_checked.size() == 1) {
-        // 单个窗口不经过 computeLayout：那是 B 的"左右分列"函数，
-        // 按契约只接受两个窗口。这里只是"它会占满整块可用区域"的预览。
-        m_screenPreview->setPlacements(
-            m_service->workArea(), {{m_checked.first(), m_service->workArea()}}, m_windows);
+void MainWindow::layoutOverlay() {
+    if (!m_actionBar) {
         return;
     }
+    const QRect area = m_canvas->geometry();
+    const QSize barSize = m_actionBar->sizeHint();
+    m_actionBar->setGeometry(area.right() - barSize.width() - 28,
+                             area.bottom() - barSize.height() - 24, barSize.width(),
+                             barSize.height());
+    m_actionBar->raise();
 
-    QVector<QRect> rects;
-    QString error;
-    if (!computeLayout(m_service->workArea(), m_checked.size(), currentMode(), kPaneGap, rects,
-                       &error)) {
-        // 工作区太小、算不出合法矩形：清空预览，具体原因留到点"排列"时再说，
-        // 免得用户在勾选的瞬间就被红字打断。
-        m_screenPreview->clear();
-        return;
-    }
-
-    QVector<Placement> placements;
-    placements.reserve(rects.size());
-    for (int i = 0; i < rects.size(); ++i) {
-        placements.push_back({m_checked.at(i), rects.at(i)});
-    }
-    m_screenPreview->setPlacements(m_service->workArea(), placements, m_windows);
+    // 状态条贴着左下角，宽度不超过画面的一半，长了就省略。
+    const QSize statusSize = m_statusLabel->sizeHint();
+    const int statusWidth = qMin(statusSize.width(), qMax(240, area.width() / 2));
+    m_statusLabel->setGeometry(area.left() + 24, area.bottom() - 24 - 30, statusWidth, 30);
+    m_statusLabel->raise();
 }
 
 void MainWindow::onRefresh() {
@@ -408,7 +414,7 @@ void MainWindow::onActivate() {
     }
     if (m_checked.size() != 1) {
         setStatus(m_checked.isEmpty()
-                      ? QStringLiteral("先在列表里勾选一个窗口，再定位。")
+                      ? QStringLiteral("先在左侧勾选一个窗口，再定位。")
                       : QStringLiteral("勾选了多个窗口，定位时请只留一个。"),
                   true);
         return;
@@ -416,19 +422,30 @@ void MainWindow::onActivate() {
     m_service->activateWindow(m_checked.first());
 }
 
-void MainWindow::onArrange() {
+void MainWindow::enterArrangement() {
+    if (!buildPlacements()) {
+        return;  // 失败原因已写进状态栏，留在桌面视图不动
+    }
+    m_arranging = true;
+    updateActionStates();
+    fadeScene([this] { updateScene(); });
+}
+
+void MainWindow::leaveArrangement() {
+    if (!m_arranging) {
+        return;
+    }
+    m_arranging = false;
+    m_placements.clear();
+    updateActionStates();
+    fadeScene([this] { updateScene(); });
+}
+
+void MainWindow::onBack() {
     if (m_animating) {
         return;
     }
-    if (m_checked.size() != 2) {
-        setStatus(QStringLiteral("勾选两个窗口后才能预览排列。"), true);
-        return;
-    }
-    if (!buildPlacements()) {
-        return;  // 失败原因已写进状态栏，留在总览页不动
-    }
-    updateActionStates();  // m_placements 变了，"确认排列"才可用
-    fadeToPage(kPreviewPage);
+    leaveArrangement();
 }
 
 bool MainWindow::buildPlacements() {
@@ -437,6 +454,7 @@ bool MainWindow::buildPlacements() {
     if (!computeLayout(m_service->workArea(), m_checked.size(), currentMode(), kPaneGap, rects,
                        &error)) {
         setStatus(error, true);
+        m_placements.clear();
         return false;
     }
 
@@ -444,7 +462,6 @@ bool MainWindow::buildPlacements() {
     for (int i = 0; i < rects.size(); ++i) {
         m_placements.push_back(Placement{m_checked.at(i), rects.at(i)});
     }
-    m_preview->setPlacements(m_service->workArea(), m_placements, m_windows);
     return true;
 }
 
@@ -453,13 +470,14 @@ LayoutMode MainWindow::currentMode() const {
 }
 
 void MainWindow::onModeChanged() {
-    if (m_pages->currentIndex() != kPreviewPage) {
+    if (!m_arranging || m_checked.size() != 2) {
         return;
     }
-    if (m_checked.size() != 2) {
-        return;
+    // 换比例立刻重画，不用退出再进来。这里不淡入淡出：切比例要的就是"马上看到"。
+    if (buildPlacements()) {
+        updateScene();
     }
-    buildPlacements();  // 换比例立刻重画，不用退出再进来
+    updateActionStates();
 }
 
 void MainWindow::onConfirm() {
@@ -467,7 +485,7 @@ void MainWindow::onConfirm() {
         return;
     }
     if (m_placements.size() != 2) {
-        setStatus(QStringLiteral("先勾选两个窗口，进入排列预览后再确认。"), true);
+        setStatus(QStringLiteral("先勾选两个窗口，等画面出现排列结果后再确认。"), true);
         return;
     }
 
@@ -494,24 +512,18 @@ void MainWindow::finishConfirm() {
         if (m_confirmFailures == 0) {
             setStatus(QStringLiteral("排列完成。"));
         } else {
-            setStatus(QStringLiteral("排列未全部成功：%1 个窗口失败，原因见列表里的 ! 标记。")
+            setStatus(QStringLiteral("排列未全部成功：%1 个窗口失败，原因见左侧列表里的红字。")
                           .arg(m_confirmFailures),
                       true);
         }
     }
-    fadeToPage(kOverviewPage);
-}
 
-void MainWindow::onBack() {
-    if (m_animating) {
-        return;
-    }
-    if (m_pages->currentIndex() == kPreviewPage) {
-        // 回总览时按当前比例重画主屏幕：用户刚在排列页换过 60/40，
-        // 回到总览还得看到同一个结果，否则他会以为比例没生效。
-        updateThumbnails();
-        fadeToPage(kOverviewPage);
-    }
+    // 回到桌面视图：这时候两个窗口的真实位置已经变成左右两栏，
+    // 画面上直接就能看到结果，不需要再额外来一句"成功"。
+    m_arranging = false;
+    m_placements.clear();
+    updateActionStates();
+    fadeScene([this] { updateScene(); });
 }
 
 void MainWindow::onOperationFinished(const OperationResult& result) {
@@ -543,34 +555,30 @@ void MainWindow::onOperationFinished(const OperationResult& result) {
     }
 }
 
-void MainWindow::fadeToPage(int index) {
-    if (m_animating || m_pages->currentIndex() == index) {
+void MainWindow::fadeScene(const std::function<void()>& swap) {
+    if (m_animating) {
+        swap();
         return;
     }
 
     m_animating = true;
-    // 动画期间禁用会改变状态的按钮：连点两下不能发两条命令。
-    m_refreshButton->setEnabled(false);
-    m_activateButton->setEnabled(false);
-    m_arrangeButton->setEnabled(false);
-    m_confirmButton->setEnabled(false);
+    updateActionStates();  // 动画期间把按钮禁掉：连点两下不能发两条命令
 
-    auto* out = new QPropertyAnimation(m_pageEffect, "opacity", this);
+    auto* out = new QPropertyAnimation(m_sceneEffect, "opacity", this);
     out->setDuration(110);
     out->setStartValue(1.0);
     out->setEndValue(0.0);
     out->setEasingCurve(QEasingCurve::InQuad);
-    connect(out, &QPropertyAnimation::finished, this, [this, index] {
-        m_pages->setCurrentIndex(index);
+    connect(out, &QPropertyAnimation::finished, this, [this, swap] {
+        swap();  // 画面全透明的那一瞬间换数据，用户看不到"跳变"
 
-        auto* in = new QPropertyAnimation(m_pageEffect, "opacity", this);
-        in->setDuration(150);
+        auto* in = new QPropertyAnimation(m_sceneEffect, "opacity", this);
+        in->setDuration(170);
         in->setStartValue(0.0);
         in->setEndValue(1.0);
-        in->setEasingCurve(QEasingCurve::OutQuad);
+        in->setEasingCurve(QEasingCurve::OutCubic);
         connect(in, &QPropertyAnimation::finished, this, [this] {
             m_animating = false;
-            m_refreshButton->setEnabled(true);
             updateActionStates();
         });
         in->start(QAbstractAnimation::DeleteWhenStopped);
@@ -582,8 +590,8 @@ void MainWindow::collapse() {
     if (m_animating) {
         return;
     }
-    if (m_pages->currentIndex() == kPreviewPage) {
-        onBack();  // 预览态先退回总览，再按一次才收起
+    if (m_arranging) {
+        leaveArrangement();  // 排列预览先退回桌面，再按一次才收起
         return;
     }
     if (!isVisible()) {
@@ -610,8 +618,8 @@ void MainWindow::collapse() {
 
 void MainWindow::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Escape) {
-        if (m_pages->currentIndex() == kPreviewPage) {
-            onBack();
+        if (m_arranging) {
+            leaveArrangement();
         } else {
             collapse();
         }
@@ -632,17 +640,33 @@ void MainWindow::showEvent(QShowEvent* event) {
     m_firstShow = false;
     setWindowOpacity(0.0);
     auto* fade = new QPropertyAnimation(this, "windowOpacity", this);
-    fade->setDuration(170);
+    fade->setDuration(180);
     fade->setStartValue(0.0);
     fade->setEndValue(1.0);
     fade->setEasingCurve(QEasingCurve::OutCubic);
     fade->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
+void MainWindow::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+
+    // 任务栏宽度按屏幕宽度取 22%。固定值在 1366 的笔记本屏上会占掉三分之一，
+    // 在 4K 上又窄得像根线。
+    const int listWidth = qBound(kListMinWidth, width() * 22 / 100, kListMaxWidth);
+    if (m_list->width() != listWidth) {
+        m_list->setFixedWidth(listWidth);
+    }
+
+    fitRows();
+    layoutOverlay();
+}
+
 void MainWindow::setStatus(const QString& text, bool error) {
     m_statusLabel->setText(text);
-    m_statusLabel->setStyleSheet(error ? QStringLiteral("color:#c1121f;")
-                                       : QStringLiteral("color:#6e6e73;"));
+    m_statusLabel->setStyleSheet(error ? QStringLiteral("color:#ff6b60;")
+                                       : QStringLiteral("color:#b9bfc8;"));
+    m_statusLabel->setVisible(!text.isEmpty());
+    layoutOverlay();
 }
 
 const WindowItem* MainWindow::findWindow(WindowId id) const {

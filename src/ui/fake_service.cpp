@@ -10,40 +10,43 @@ namespace {
 //   - 两个普通应用窗口（能成功定位、能成功排列）
 //   - 一个系统应用窗口（能列出、定位会被系统拒绝 —— 对应 M2 的失败路径）
 //   - 一个标题很长的窗口（验证列表和预览里的省略号，不会把布局撑破）
+//
+// 位置按"真实桌面"来摆：左右各占半屏、中间两个浮窗压在上面。
+// 只有这样才能看出这个界面要表达的东西——一屏里谁大谁小、谁压住了谁。
 QVector<WindowItem> makeWindows() {
     QVector<WindowItem> windows;
-
-    WindowItem notepad;
-    notepad.id = 1;
-    notepad.title = QStringLiteral("未命名 - 记事本");
-    notepad.processName = QStringLiteral("notepad.exe");
-    notepad.bounds = QRect(180, 120, 900, 620);
-    notepad.hasBounds = true;
-    windows.push_back(notepad);
 
     WindowItem explorer;
     explorer.id = 2;
     explorer.title = QStringLiteral("项目资料");
     explorer.processName = QStringLiteral("explorer.exe");
-    explorer.bounds = QRect(60, 60, 1280, 820);
+    explorer.bounds = QRect(0, 0, 1180, 1040);
     explorer.hasBounds = true;
     windows.push_back(explorer);
-
-    WindowItem settings;
-    settings.id = 3;
-    settings.title = QStringLiteral("设置");
-    settings.processName = QStringLiteral("SystemSettings.exe");
-    settings.bounds = QRect(320, 160, 1024, 720);
-    settings.hasBounds = true;
-    windows.push_back(settings);
 
     WindowItem browser;
     browser.id = 4;
     browser.title = QStringLiteral("CrossDesk 需求讨论 - 浏览器");
     browser.processName = QStringLiteral("chrome.exe");
-    browser.bounds = QRect(100, 100, 1440, 900);
+    browser.bounds = QRect(1180, 0, 740, 1040);
     browser.hasBounds = true;
     windows.push_back(browser);
+
+    WindowItem notepad;
+    notepad.id = 1;
+    notepad.title = QStringLiteral("未命名 - 记事本");
+    notepad.processName = QStringLiteral("notepad.exe");
+    notepad.bounds = QRect(300, 180, 900, 640);
+    notepad.hasBounds = true;
+    windows.push_back(notepad);
+
+    WindowItem settings;
+    settings.id = 3;
+    settings.title = QStringLiteral("设置");
+    settings.processName = QStringLiteral("SystemSettings.exe");
+    settings.bounds = QRect(760, 300, 820, 560);
+    settings.hasBounds = true;
+    windows.push_back(settings);
 
     return windows;
 }

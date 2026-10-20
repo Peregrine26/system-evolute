@@ -7,20 +7,20 @@
 #include <QVector>
 #include <QWidget>
 
+#include <functional>
+
 class QGraphicsOpacityEffect;
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QRadioButton;
-class QStackedWidget;
 
 namespace crossdesk::ui {
 
 class LayoutPreview;
-class ThumbnailSlot;
 
-// 主窗口：一页总览 + 一页左右排列预览。
+// 主窗口：左边一条任务栏，右边一整块主屏幕画面，铺满整个显示器。
 //
 // 两条硬规则写在代码里，答辩时可以直接指着讲：
 //   1. 界面只认 CrossDeskService，不 include windows.h，不自己算窗口归属；
@@ -39,14 +39,16 @@ public:
     // 收起：Esc 或全局热键触发。
     void collapse();
 
+    bool isAnimating() const { return m_animating; }
+    bool isArranging() const { return m_arranging; }
+
 protected:
     void keyPressEvent(QKeyEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     void buildUi();
-    QWidget* buildOverviewPage();
-    QWidget* buildPreviewPage();
     void connectService();
 
     void applyWindows();
@@ -54,22 +56,27 @@ private:
     QString textFor(const WindowItem& window) const;
     void refreshRow(WindowId id);
     void updateActionStates();
-    void updateThumbnails();
+    void updateScene();
+    void fitRows();
+    void layoutOverlay();
 
     void onItemChanged(QListWidgetItem* item);
     void onRefresh();
     void onActivate();
-    void onArrange();
     void onConfirm();
     void onBack();
     void onModeChanged();
     void onOperationFinished(const OperationResult& result);
 
+    void enterArrangement();
+    void leaveArrangement();
     bool buildPlacements();
     void finishConfirm();
     LayoutMode currentMode() const;
 
-    void fadeToPage(int index);
+    // 画面切换动画：先淡出，在透明的那一瞬间换数据，再淡入。
+    void fadeScene(const std::function<void()>& swap);
+
     void setStatus(const QString& text, bool error = false);
 
     const WindowItem* findWindow(WindowId id) const;
@@ -80,22 +87,23 @@ private:
     QVector<Placement> m_placements;
     QHash<WindowId, QString> m_failures;
 
-    QStackedWidget* m_pages = nullptr;
     QListWidget* m_list = nullptr;
-    QPushButton* m_refreshButton = nullptr;
+    LayoutPreview* m_canvas = nullptr;  // 右侧整块主屏幕
+
+    // 浮在画面上的操作条：不占布局，没得点的时候整条隐藏。
+    QWidget* m_actionBar = nullptr;
     QPushButton* m_activateButton = nullptr;
-    QPushButton* m_arrangeButton = nullptr;
     QPushButton* m_confirmButton = nullptr;
     QPushButton* m_backButton = nullptr;
     QRadioButton* m_equalRadio = nullptr;
     QRadioButton* m_masterRadio = nullptr;
     QLabel* m_statusLabel = nullptr;
-    LayoutPreview* m_screenPreview = nullptr;  // 总览右侧的"主屏幕"
-    LayoutPreview* m_preview = nullptr;        // 排列页的确认预览
-    QGraphicsOpacityEffect* m_pageEffect = nullptr;
 
-    bool m_syncingChecks = false;   // 防止程序改勾选状态时递归触发 itemChanged
-    bool m_animating = false;       // 动画期间不接受新命令，避免重复触发
+    QGraphicsOpacityEffect* m_sceneEffect = nullptr;
+
+    bool m_syncingChecks = false;  // 防止程序改勾选状态时递归触发 itemChanged
+    bool m_animating = false;      // 动画期间不接受新命令，避免重复触发
+    bool m_arranging = false;      // 当前画面是"排列预览"还是"桌面总览"
     bool m_allowHide = false;
     bool m_firstShow = true;
     bool m_statusTakenByRefresh = false;

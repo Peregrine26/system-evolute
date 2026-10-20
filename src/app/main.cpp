@@ -9,7 +9,6 @@
 #include <QCoreApplication>
 #include <QListWidget>
 #include <QListWidgetItem>
-#include <QPushButton>
 #include <QStringList>
 #include <QTimer>
 
@@ -47,15 +46,23 @@ int main(int argc, char* argv[]) {
     crossdesk::ui::MainWindow window(service.get());
     // 只有全局热键接入后才该真正隐藏，否则窗口会从任务栏消失且找不回来。
     window.setAllowHide(args.contains(QStringLiteral("--allow-hide")));
-    window.show();
+
+    // 默认铺满整个显示器：这不是一个"应用窗口"，而是一层盖在桌面上的总览。
+    // --windowed 留给调试和截图对照用。
+    if (args.contains(QStringLiteral("--windowed"))) {
+        window.resize(1440, 900);
+        window.show();
+    } else {
+        window.showFullScreen();
+    }
 
     const QString shotPath = argValue(args, QStringLiteral("--shot"));
     if (!shotPath.isEmpty()) {
-        const bool previewShot = args.contains(QStringLiteral("--shot-preview"));
-        // --shot-select：只勾两个窗口、留在总览页，用来截"主屏幕摆了两块"的图。
-        const bool selectShot = args.contains(QStringLiteral("--shot-select"));
-        QTimer::singleShot(320, &window, [&window, shotPath, previewShot, selectShot] {
-            if (previewShot || selectShot) {
+        // --shot-select：勾两个窗口，让画面自动切到排列结果，用来截"排完之后"的图。
+        const bool selectShot = args.contains(QStringLiteral("--shot-select")) ||
+                                args.contains(QStringLiteral("--shot-preview"));
+        QTimer::singleShot(360, &window, [&window, shotPath, selectShot] {
+            if (selectShot) {
                 // 截图辅助：从外部操作控件，不往主窗口里加测试专用 API。
                 if (auto* list = window.findChild<QListWidget*>(QStringLiteral("windowList"))) {
                     int checked = 0;
@@ -68,14 +75,9 @@ int main(int argc, char* argv[]) {
                         ++checked;
                     }
                 }
-                if (auto* arrange =
-                        window.findChild<QPushButton*>(QStringLiteral("arrangeButton"))) {
-                    if (previewShot) {
-                        arrange->click();
-                    }
-                }
             }
-            const int delay = previewShot ? 420 : 0;
+            // 勾满两个会触发一次淡出淡入，等它跑完再截。
+            const int delay = selectShot ? 520 : 0;
             QTimer::singleShot(delay, &window, [&window, shotPath] {
                 window.grab().save(shotPath);
                 QCoreApplication::quit();

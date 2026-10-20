@@ -8,6 +8,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 
+#include <algorithm>
 #include <cstdint>
 
 namespace crossdesk::ui {
@@ -19,6 +20,11 @@ namespace {
 // 不是过滤规则的最终答案——真正的规则应由 A 的扫描器/B 的筛选层定义。
 constexpr int kMinWidth = 160;
 constexpr int kMinHeight = 90;
+
+// 列表里最多留几个窗口。总览的意义是"一眼看完"，不是把任务管理器抄一遍；
+// 三到四个正好占满左边那条任务栏，也不会让人在一堆后台窗口里找目标。
+// 超出时按窗口面积从大到小留——面积大的通常才是用户真正在用的那个。
+constexpr int kMaxWindows = 4;
 
 QString fromWide(const std::wstring& text) {
     return QString::fromStdWString(text);
@@ -70,6 +76,14 @@ void LiveService::refresh() {
         if (info.process_id == m_selfPid) {
             continue;  // 别把总览自己列进去
         }
+        // 桌面本身和输入法候选窗不是"应用窗口"：它们各占一个位置，
+        // 桌面那层还会在画面上铺满整块、把别的窗口全盖住。
+        if (info.process_name == L"explorer.exe" && info.title == L"Program Manager") {
+            continue;
+        }
+        if (info.process_name == L"TextInputHost.exe") {
+            continue;
+        }
         const int width = info.bounds.right - info.bounds.left;
         const int height = info.bounds.bottom - info.bounds.top;
         if (width < kMinWidth || height < kMinHeight) {
@@ -83,6 +97,18 @@ void LiveService::refresh() {
         item.bounds = QRect(info.bounds.left, info.bounds.top, width, height);
         item.hasBounds = true;
         windows.push_back(item);
+    }
+
+    // 只留最大的几个：面积大的通常是用户正在用的主窗口，
+    // 一排小工具窗口挤在前面反而找不到目标。
+    std::stable_sort(windows.begin(), windows.end(),
+                     [](const WindowItem& a, const WindowItem& b) {
+                         const qint64 areaA = qint64(a.bounds.width()) * a.bounds.height();
+                         const qint64 areaB = qint64(b.bounds.width()) * b.bounds.height();
+                         return areaA > areaB;
+                     });
+    if (windows.size() > kMaxWindows) {
+        windows.resize(kMaxWindows);
     }
 
     m_windows = windows;
