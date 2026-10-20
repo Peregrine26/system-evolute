@@ -18,9 +18,6 @@ constexpr int kGap = 10;
 constexpr int kTextHeight = 46;
 constexpr int kCardRadius = 10;
 
-// 超过这个数量就不平铺了，改成叠起来——四个以上平铺，每张就只剩一条了。
-constexpr int kMaxTiled = 4;
-
 const QColor kAccent(0x0a, 0x84, 0xff);
 
 }  // namespace
@@ -53,6 +50,22 @@ void WindowCard::setOverlapped(bool on) {
         return;
     }
     m_overlapped = on;
+    update();
+}
+
+void WindowCard::setCoverEdge(int y) {
+    if (m_coverEdge == y) {
+        return;
+    }
+    m_coverEdge = y;
+    update();
+}
+
+void WindowCard::setDepth(int depth) {
+    if (m_depth == depth) {
+        return;
+    }
+    m_depth = depth;
     update();
 }
 
@@ -207,14 +220,25 @@ void WindowCard::paintEvent(QPaintEvent*) {
         painter.drawEllipse(QPointF(width() - 16, textTop + 9), 3.5, 3.5);
     }
 
-    // 叠影时画一道从顶部压下来的阴影，卡片之间才有"前后"的感觉。
-    if (m_overlapped) {
+    // 越深压得越暗：一摞叠起来时，后面的本来就该退到阴影里。
+    if (m_depth > 0) {
         painter.save();
         painter.setClipPath(cardPath);
-        QLinearGradient shadow(0, 0, 0, 18);
-        shadow.setColorAt(0.0, QColor(0, 0, 0, 120));
+        painter.fillPath(cardPath, QColor(0, 0, 0, qMin(72, m_depth * 12)));
+        painter.restore();
+    }
+
+    // 叠影时画一道从顶部压下来的阴影，卡片之间才有"前后"的感觉。
+    if (m_overlapped) {
+        // 从"上一张的下边缘"往下压一道阴影：叠影的层次全靠它，否则两段同色很难看出前后。
+        painter.save();
+        painter.setClipPath(cardPath);
+        const qreal top = qBound(0, m_coverEdge, qMax(0, height() - 4));
+        QLinearGradient shadow(0, top, 0, top + 22);
+        shadow.setColorAt(0.0, QColor(0, 0, 0, 150));
+        shadow.setColorAt(0.55, QColor(0, 0, 0, 60));
         shadow.setColorAt(1.0, QColor(0, 0, 0, 0));
-        painter.fillRect(QRectF(0, 0, width(), 18), shadow);
+        painter.fillRect(QRectF(0, top, width(), 22), shadow);
         painter.restore();
     }
 }
@@ -283,60 +307,48 @@ void CardStack::relayout(bool animated) {
         return;
     }
 
-    m_stacked = count > kMaxTiled;
     const int width = this->width() - kMargin * 2;
     // 上下也留出同样的边：贴着窗口边缘会被切掉圆角和边框，看起来像溢出而不是铺满。
     const int inner = this->height() - kMargin * 2;
 
-    if (!m_stacked) {
-        const int height = qMax(60, (inner - kGap * (count - 1)) / count);
-        for (int i = 0; i < count; ++i) {
-            QRect target(kMargin, kMargin + i * (height + kGap), width, height);
-            WindowCard* card = m_cards.at(i);
-            if (animated && card->geometry() != target) {
-                auto* anim = new QPropertyAnimation(card, "geometry", card);
-                anim->setDuration(160);
-                anim->setEasingCurve(QEasingCurve::OutCubic);
-                anim->setStartValue(card->geometry());
-                anim->setEndValue(target);
-                anim->start(QAbstractAnimation::DeleteWhenStopped);
-            } else {
-                card->setGeometry(target);
-            }
+    // 一张的时候没得叠，整栏给它；两张起就斜着叠——参考图里本来就是叠着的。
+    m_stacked = count > 1;
+
+    int cardHeight = inner;
+    int step = inner;
+    int shift = 0;
+
+    if (m_stacked) {
+        // 最前面那张不必高过半栏；往下的这段至少要放得下一条标题条，
+        // 否则下面那张的标题会被上面这张压掉一半。
+        const int maxCard = qMin(280, inner / 2);
+        step = qMax(kTextHeight, qMin(inner * 22 / 100, (inner - maxCard) / (count - 1)));
+        cardHeight = inner - (count - 1) * step;
+
+        // 连一条标题都排不下（大约 20 张以上）：不再叠影，退化成一条条标题。
+        // 这时卡片高度就等于行高，相邻两张正好不重叠，字也就不会互相压。
+        m_compact = cardHeight < kTextHeight;
+        if (m_compact) {
+            step = qMax(1, inner / count);
+            cardHeight = step;
         }
-        // 平铺没有遮挡，叠放顺序无所谓，按顺序放就行。
-        for (int i = count - 1; i >= 0; --i) {
-            m_cards.at(i)->raise();
-            m_cards.at(i)->setOverlapped(false);
-            m_cards.at(i)->setCompact(false);
-        }
+
+        // 每深一张往右错一点，像一摞卡片投出来的重影；右边缘对齐，左边一级级往里收。
+        // 横向总量压在栏宽的 40% 以内，否则最后几张会瘦成一条；压缩档不斜。
+        shift = m_compact ? 0 : qBound(4, width * 40 / 100 / (count - 1), 20);
+    } else {
         m_compact = false;
-        m_step = height + kGap;
-        return;
     }
 
-    // 叠起来：最前那张完整显示，其余每张往下挪一小段，只露出下面那行字。
-    // 关键约束：挪的这段不能小于一条标题条的高度（kTextHeight），否则下面那张的
-    // 标题会被上面这张盖掉一半——窗口越多越糊，20 个的时候两行字直接叠在一起。
-    const int desired = qBound(180, static_cast<int>(this->height() * 0.34), 280);
-    // 要保证 step >= kTextHeight，最前那张最多只能有这么高。
-    const int ceiling = inner - (count - 1) * kTextHeight;
-    int cardHeight = qBound(kTextHeight, ceiling, desired);
-    int step = count > 1 ? (inner - cardHeight) / (count - 1) : 0;
-
-    // 连"一条标题"的高度都排不下（大约 20 个以上）：不再叠影，退化成一条条标题。
-    // 这时卡片高度就等于行高，相邻两张正好不重叠，字也就不会互相压。
-    m_compact = count > 1 && step < kTextHeight;
-    if (m_compact) {
-        step = qMax(1, inner / count);
-        cardHeight = step;
-    }
     m_step = step;
+    m_shift = shift;
 
     for (int i = 0; i < count; ++i) {
-        QRect target(kMargin, kMargin + i * step, width, cardHeight);
+        const QRect target(kMargin + i * shift, kMargin + i * step, width - i * shift, cardHeight);
         WindowCard* card = m_cards.at(i);
         card->setCompact(m_compact);
+        card->setCoverEdge(cardHeight - step);
+        card->setDepth(m_compact ? 0 : i);
         if (animated && card->geometry() != target) {
             auto* anim = new QPropertyAnimation(card, "geometry", card);
             anim->setDuration(160);
@@ -356,6 +368,40 @@ void CardStack::relayout(bool animated) {
 }
 
 int CardStack::cardIndexAt(const QPoint& pos) const {
+    if (m_stacked && !m_compact) {
+        // 斜着叠之后每张真正露出来的只有下面这一条（最前那张整块都是它自己的），
+        // 所以先按"露出来的那一条"判定，不能拿整张的矩形去撞。
+        for (int i = 0; i < m_cards.size(); ++i) {
+            WindowCard* card = m_cards.at(i);
+            if (!card->isVisible()) {
+                continue;
+            }
+            if (i == 0) {
+                if (card->geometry().contains(pos)) {
+                    return 0;
+                }
+                continue;
+            }
+            const QRect band(card->x(), card->y() + card->height() - m_step, card->width(),
+                             m_step);
+            if (band.contains(pos)) {
+                return i;
+            }
+        }
+        // 斜着叠会在左下角留出一条三角形空档。落在空档里时按行去找那一行是谁，
+        // 否则那一片点了没反应，像坏了一样。
+        for (int i = 1; i < m_cards.size(); ++i) {
+            WindowCard* card = m_cards.at(i);
+            if (!card->isVisible()) {
+                continue;
+            }
+            if (pos.y() >= card->y() + card->height() - m_step && pos.y() < card->y() + card->height()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     for (int i = 0; i < m_cards.size(); ++i) {
         if (m_cards.at(i)->isVisible() && m_cards.at(i)->geometry().contains(pos)) {
             return i;

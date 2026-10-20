@@ -115,9 +115,11 @@ int main(int argc, char* argv[]) {
     QCoreApplication::processEvents();
     const QVector<crossdesk::ui::WindowItem> windows = service.windows();
 
-    // ---- 左栏：四个窗口平铺 ----
+    // ---- 左栏：四张卡斜着叠起来 ----
     check(stack->cardCount() == 4, "左栏有四张窗口卡");
-    check(!stack->isStacked(), "四个窗口以内是平铺，不叠");
+    check(stack->isStacked(), "四个窗口也是斜着叠起来的，不平铺");
+    check(!stack->isCompact(), "四张还没压到只剩标题");
+    check(stack->stackedShift() > 0, "叠的时候左右错开");
     check(window.selectedWindow() == windows.first().id, "启动时默认选中第一个窗口");
 
     // ---- 右栏：只显示一个窗口，且铺满 ----
@@ -181,6 +183,11 @@ int main(int argc, char* argv[]) {
     check(stack2->cardCount() == 8, "八个窗口时左栏有八张卡");
     check(stack2->isStacked(), "超过四个就叠起来");
     check(stack2->topWindow() == many.windows().first().id, "最前面是第一个窗口");
+    check(stack2->stackedShift() > 0, "叠影是斜着错开的，不是一列直上直下");
+    check(stack2->cardAt(4) && stack2->cardAt(0) && stack2->cardAt(4)->x() > stack2->cardAt(0)->x(),
+          "越往后错得越靠右");
+    check(stack2->cardAt(4) && stack2->cardAt(4)->width() < stack2->cardAt(0)->width(),
+          "越往后越窄，右边缘对齐");
 
     const crossdesk::ui::WindowId lastId = many.windows().last().id;
     clickCard(stack2, 7);

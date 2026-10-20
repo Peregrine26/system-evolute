@@ -23,7 +23,12 @@ public:
     bool isSelected() const { return m_selected; }
 
     // 叠影时上面那张会压住这张的顶部，画一道内阴影让层次看得出来。
+    // coverEdge 是"上一张的下边缘在哪"（卡片内部坐标）：阴影从这条线往下压，
+    // 而不是从卡片自己的顶边压——顶边本来就被盖住了，画在那儿谁也看不见。
     void setOverlapped(bool on);
+    void setCoverEdge(int y);
+    // 在叠影里的第几层（0 = 最前）。越深画得越暗，像一层层压出来的重影。
+    void setDepth(int depth);
 
     // 压缩模式：窗口多到连一条标题都排不下时，整张卡退化成一条标题，
     // 不再画画面区。宁可没有预览，也不能让两行字叠在一起。
@@ -48,14 +53,16 @@ private:
     bool m_selected = false;
     bool m_overlapped = false;
     bool m_compact = false;
+    int m_coverEdge = 0;
+    int m_depth = 0;
 };
 
 // 左栏的卡片堆。
 //
-// 两种摆法，取决于窗口数量：
-//   - 四个以内：竖着平铺，每张等分高度，正好铺满整条栏；
-//   - 多于四个：叠起来，最前那张完整显示，其余每张只露出下面一条标题。
-//     点哪张哪张就到最前；按住拖动可以把它从叠影里抽出来。
+// 只有一张时整栏给它；两张起就斜着叠起来——
+// 最前那张完整显示，其余每张往下挪一段、往右错一点，只露出下面那条标题，
+// 像一摞卡片投出来的重影。点哪张哪张就到最前，按住拖动也可以把它抽出来。
+// 窗口多到连一条标题都排不下时，退化成一条条标题（`isCompact()`）。
 class CardStack : public QWidget {
     Q_OBJECT
 
@@ -70,7 +77,10 @@ public:
     bool isStacked() const { return m_stacked; }
     // 相邻两张的间距（叠影时就是每张露出来的那一条有多高）。
     int stackedStep() const { return m_step; }
+    // 每深一张往右错开多少像素（斜着叠的那个斜度）。
+    int stackedShift() const { return m_shift; }
     bool isCompact() const { return m_compact; }
+    WindowCard* cardAt(int index) const { return m_cards.value(index, nullptr); }
     // 排在最前的那张（叠影时就是完整露出来的那张）。
     WindowId topWindow() const { return m_cards.isEmpty() ? 0 : m_cards.first()->windowId(); }
 
@@ -98,6 +108,7 @@ private:
     bool m_stacked = false;
     bool m_compact = false;
     int m_step = 0;
+    int m_shift = 0;
 
     int m_pressIndex = -1;
     QPoint m_pressPos;
