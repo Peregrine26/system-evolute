@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QMainWindow>
 #include <QPushButton>
+#include <QScreen>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -18,11 +19,14 @@ int main(int argc, char** argv) {
     second.setAttribute(Qt::WA_QuitOnClose, false);
     first.setWindowTitle(QStringLiteral("CrossDesk live source A"));
     second.setWindowTitle(QStringLiteral("CrossDesk live source B"));
-    first.resize(320, 220);
-    second.resize(320, 220);
+    const auto work = app.primaryScreen()->availableGeometry();
+    first.resize(320, 180);
+    second.resize(320, 180);
+    first.move(work.topLeft() + QPoint(20, 20));
+    second.move(work.topLeft() + QPoint(360, 20));
     QLabel a(&first), b(&second);
-    a.setGeometry(20, 20, 280, 160);
-    b.setGeometry(20, 20, 280, 160);
+    a.setGeometry(20, 20, 280, 140);
+    b.setGeometry(20, 20, 280, 140);
     QTimer frames;
     int count = 0;
     QObject::connect(&frames, &QTimer::timeout, [&] {
@@ -32,10 +36,14 @@ int main(int argc, char** argv) {
     frames.start(100);
     first.show();
     second.show();
+    // Give both sources an initial backing-store frame before showing the
+    // destination. A never-exposed Qt source may otherwise appear as an icon.
+    app.processEvents();
 
     QMainWindow window;
     window.setWindowTitle(QStringLiteral("CrossDesk Qt DWM experiment"));
-    window.resize(800, 500);
+    window.resize(800, 420);
+    window.move(work.topLeft() + QPoint(20, 230));
     auto* body = new QWidget;
     auto* layout = new QVBoxLayout(body);
     auto* status = new QLabel;

@@ -60,6 +60,14 @@ int main() {
         });
         ok &= check(results[0].ready() && results[1].status == DesktopStatus::InvalidWindow,
                     "one invalid source broke valid preview");
+        ShowWindow(source, SW_HIDE);
+        previews.refresh();
+        results = previews.replace(native(destination), {
+            {native(source), {10, 10, 200, 180}}, {native(other), {220, 10, 410, 180}}
+        });
+        ok &= check(results[0].status == DesktopStatus::InvalidWindow && results[1].ready(),
+                    "hidden source should fall back without affecting the other preview");
+        ShowWindow(source, SW_SHOWNA);
         results = previews.replace(native(destination), {{native(source), {-1, 0, 50, 50}}});
         ok &= check(results[0].status == DesktopStatus::InvalidRectangle, "invalid slot accepted");
         results = previews.replace(native(source), {{native(source), {0, 0, 50, 50}}});
