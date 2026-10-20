@@ -1,52 +1,83 @@
-#include "ui/fake_workspace_service.h"
-#include "ui/overview_window.h"
-#include "ui/workspace_service.h"
+#include "ui/fake_service.h"
+#include "ui/main_window.h"
 
 #ifdef CROSSDESK_HAS_LIVE_SCANNER
-#include "ui/live_workspace_service.h"
+#include "ui/live_service.h"
 #endif
 
 #include <QApplication>
-#include <QPixmap>
+#include <QCoreApplication>
+#include <QListWidget>
+#include <QListWidgetItem>
+#include <QPushButton>
+#include <QStringList>
 #include <QTimer>
 
 #include <memory>
 
+namespace {
+
+QString argValue(const QStringList& args, const QString& key) {
+    const int index = args.indexOf(key);
+    if (index < 0 || index + 1 >= args.size()) {
+        return QString();
+    }
+    return args.at(index + 1);
+}
+
+}  // namespace
+
 int main(int argc, char* argv[]) {
-    QApplication application(argc, argv);
-    const QStringList args = application.arguments();
+    QApplication app(argc, argv);
+    const QStringList args = app.arguments();
 
-    // 默认是假数据（答辩演示要可复现）；--live 才读真实窗口。
-    // 两者都只实现 WorkspaceService 抽象，OverviewWindow 一行都不用改。
-    bool liveMode = false;
-    std::unique_ptr<crossdesk::ui::WorkspaceService> service;
+    // 默认走真实窗口：这是 M1 要的东西，"空壳感"也主要来自假数据。
+    // --fake 保留一个不依赖平台接口的完整可演示版本。
+    std::unique_ptr<crossdesk::ui::CrossDeskService> service;
+    const bool forceFake = args.contains(QStringLiteral("--fake"));
 #ifdef CROSSDESK_HAS_LIVE_SCANNER
-    liveMode = args.contains(QStringLiteral("--live"));
+    if (!forceFake) {
+        service = std::make_unique<crossdesk::ui::LiveService>();
+    }
 #endif
-    if (liveMode) {
-#ifdef CROSSDESK_HAS_LIVE_SCANNER
-        service = std::make_unique<crossdesk::ui::LiveWorkspaceService>();
-#endif
-    } else {
-        service = std::make_unique<crossdesk::ui::FakeWorkspaceService>();
+    if (!service) {
+        service = std::make_unique<crossdesk::ui::FakeService>();
     }
 
-    crossdesk::ui::OverviewWindow window(service.get());
-    if (liveMode) {
-        window.setWindowTitle(QStringLiteral("CrossDesk 总览 · 实时窗口（只读）"));
-    }
+    crossdesk::ui::MainWindow window(service.get());
+    // 只有全局热键接入后才该真正隐藏，否则窗口会从任务栏消失且找不回来。
+    window.setAllowHide(args.contains(QStringLiteral("--allow-hide")));
     window.show();
 
-    // --shot <路径>：截一张界面图然后退出，供讲解卡和答辩材料使用。
-    // 用 100ms 而不是 0：0 时首帧还没画完，截出来是空白窗口。
-    const int shotIndex = args.indexOf(QStringLiteral("--shot"));
-    if (shotIndex > 0 && shotIndex + 1 < args.size()) {
-        const QString path = args.at(shotIndex + 1);
-        QTimer::singleShot(300, &application, [&window, path, &application] {
-            const bool ok = window.grab().save(path);
-            application.exit(ok ? 0 : 1);
+    const QString shotPath = argValue(args, QStringLiteral("--shot"));
+    if (!shotPath.isEmpty()) {
+        const bool previewShot = args.contains(QStringLiteral("--shot-preview"));
+        QTimer::singleShot(320, &window, [&window, shotPath, previewShot] {
+            if (previewShot) {
+                // 截图辅助：从外部操作控件，不往主窗口里加测试专用 API。
+                if (auto* list = window.findChild<QListWidget*>(QStringLiteral("windowList"))) {
+                    int checked = 0;
+                    for (int row = 0; row < list->count() && checked < 2; ++row) {
+                        QListWidgetItem* item = list->item(row);
+                        if (!item || !(item->flags() & Qt::ItemIsUserCheckable)) {
+                            continue;
+                        }
+                        item->setCheckState(Qt::Checked);
+                        ++checked;
+                    }
+                }
+                if (auto* arrange =
+                        window.findChild<QPushButton*>(QStringLiteral("arrangeButton"))) {
+                    arrange->click();
+                }
+            }
+            const int delay = previewShot ? 420 : 0;
+            QTimer::singleShot(delay, &window, [&window, shotPath] {
+                window.grab().save(shotPath);
+                QCoreApplication::quit();
+            });
         });
     }
 
-    return application.exec();
+    return app.exec();
 }

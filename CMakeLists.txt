@@ -21,12 +21,16 @@ if(CROSSDESK_BUILD_GUI)
 
     # UI 单独成库，这样交付程序和无界面冒烟测试编译的是同一份代码。
     add_library(crossdesk_ui STATIC
-        src/ui/overview_types.h
-        src/ui/workspace_service.h
-        src/ui/fake_workspace_service.cpp
-        src/ui/fake_workspace_service.h
-        src/ui/overview_window.cpp
-        src/ui/overview_window.h
+        src/ui/window_item.h
+        src/ui/layout_math.h
+        src/ui/layout_math.cpp
+        src/ui/crossdesk_service.h
+        src/ui/fake_service.h
+        src/ui/fake_service.cpp
+        src/ui/preview_widgets.h
+        src/ui/preview_widgets.cpp
+        src/ui/main_window.h
+        src/ui/main_window.cpp
     )
     target_include_directories(crossdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(crossdesk_ui PUBLIC Qt6::Widgets)
@@ -79,12 +83,12 @@ if(CROSSDESK_BUILD_SCANNER)
     )
 endif()
 
-# 只读实时数据源：把 A 的扫描器接到界面上，显示真实窗口。
-# 只做查询，不做隐藏/恢复/置前，因此不越 A、B 的边界。
+# 真实窗口数据源：把 A 的扫描器接到界面上，显示真实窗口。
+# 只做扫描和"屏幕可用区域"，置前/设位置等待 A 的命令接口。
 if(CROSSDESK_BUILD_GUI AND WIN32 AND CROSSDESK_BUILD_SCANNER)
     target_sources(crossdesk_ui PRIVATE
-        src/ui/live_workspace_service.cpp
-        src/ui/live_workspace_service.h
+        src/ui/live_service.cpp
+        src/ui/live_service.h
     )
     target_link_libraries(crossdesk_ui PUBLIC
         crossdesk_window_scanner_lib
