@@ -59,9 +59,12 @@ private:
 
 // 左栏的卡片堆。
 //
-// 只有一张时整栏给它；两张起就斜着叠起来——
-// 最前那张完整显示，其余每张往下挪一段、往右错一点，只露出下面那条标题，
-// 像一摞卡片投出来的重影。点哪张哪张就到最前，按住拖动也可以把它抽出来。
+// 四张以内平铺：每张等分高度，正好把整条栏填满，一张也不叠。
+// 为了让人看出"这一摞还有厚度"，第一张卡背后会垫几层影子界面——
+// 不是真实窗口，只是几张略亮、往右下错开的圆角板，像压在下面的一摞纸。
+//
+// 五张起平铺就只剩一条缝了，改成斜着叠：最前那张完整显示，其余每张往下挪一段、
+// 往右错一点，只露出下面那条标题。点哪张哪张就到最前，按住拖动也能把它抽出来。
 // 窗口多到连一条标题都排不下时，退化成一条条标题（`isCompact()`）。
 class CardStack : public QWidget {
     Q_OBJECT
@@ -75,6 +78,8 @@ public:
 
     int cardCount() const { return m_cards.size(); }
     bool isStacked() const { return m_stacked; }
+    // 第一张卡背后垫了几层影子界面（0 = 没垫，只在平铺时才有）。
+    int shadowLayers() const { return m_shadowLayers; }
     // 相邻两张的间距（叠影时就是每张露出来的那一条有多高）。
     int stackedStep() const { return m_step; }
     // 每深一张往右错开多少像素（斜着叠的那个斜度）。
@@ -109,6 +114,7 @@ private:
     bool m_compact = false;
     int m_step = 0;
     int m_shift = 0;
+    int m_shadowLayers = 0;
 
     int m_pressIndex = -1;
     QPoint m_pressPos;
