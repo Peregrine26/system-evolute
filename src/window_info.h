@@ -21,6 +21,7 @@ struct WindowInfo {
     std::wstring title;
     WindowBounds bounds;
     bool visible = false;
+    bool minimized = false;
 };
 
 }  // namespace crossdesk

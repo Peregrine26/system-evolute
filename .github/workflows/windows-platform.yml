@@ -1,0 +1,17 @@
+name: Windows platform
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  platform:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure without Qt
+        run: cmake -S . -B build-platform -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=OFF
+      - name: Build
+        run: cmake --build build-platform --config Debug --parallel
+      - name: Test layout integration without desktop operations
+        run: ctest --test-dir build-platform -C Debug -R "^layout_executor_test$" --output-on-failure
