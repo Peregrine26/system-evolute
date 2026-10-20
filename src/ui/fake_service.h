@@ -15,7 +15,8 @@ class FakeService : public CrossDeskService {
     Q_OBJECT
 
 public:
-    explicit FakeService(QObject* parent = nullptr);
+    // windowCount 用来演示两种摆法：4 个平铺，8 个叠起来。
+    explicit FakeService(QObject* parent = nullptr, int windowCount = 4);
 
     QVector<WindowItem> windows() const override;
     QRect workArea() const override;
@@ -31,6 +32,7 @@ public:
 private:
     QVector<WindowItem> m_windows;
     QRect m_workArea;
+    int m_windowCount = 4;
 };
 
 }  // namespace crossdesk::ui

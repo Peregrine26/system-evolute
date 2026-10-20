@@ -13,7 +13,7 @@ namespace {
 //
 // 位置按"真实桌面"来摆：左右各占半屏、中间两个浮窗压在上面。
 // 只有这样才能看出这个界面要表达的东西——一屏里谁大谁小、谁压住了谁。
-QVector<WindowItem> makeWindows() {
+QVector<WindowItem> makeWindows(int count) {
     QVector<WindowItem> windows;
 
     WindowItem explorer;
@@ -48,14 +48,26 @@ QVector<WindowItem> makeWindows() {
     settings.hasBounds = true;
     windows.push_back(settings);
 
+    // 第 5 个起只是凑数：用来演示"窗口多到放不下时，卡片改成叠起来"。
+    for (int i = 5; i <= count; ++i) {
+        WindowItem extra;
+        extra.id = static_cast<WindowId>(100 + i);
+        extra.title = QStringLiteral("第 %1 个窗口").arg(i);
+        extra.processName = QStringLiteral("app%1.exe").arg(i);
+        extra.bounds = QRect(120 + (i - 5) * 60, 120 + (i - 5) * 40, 760, 520);
+        extra.hasBounds = true;
+        windows.push_back(extra);
+    }
+
     return windows;
 }
 
 }  // namespace
 
-FakeService::FakeService(QObject* parent)
+FakeService::FakeService(QObject* parent, int windowCount)
     : CrossDeskService(parent),
-      m_windows(makeWindows()),
+      m_windows(makeWindows(windowCount)),
+      m_windowCount(windowCount),
       // 1920×1080 减去 40 像素任务栏：和真实单显示器场景一致，
       // 但它是常量而不是查询结果，所以只在假数据模式下使用。
       m_workArea(0, 0, 1920, 1040) {}
@@ -124,7 +136,7 @@ void FakeService::simulateClose(WindowId window) {
 }
 
 void FakeService::reset() {
-    m_windows = makeWindows();
+    m_windows = makeWindows(m_windowCount);
 }
 
 }  // namespace crossdesk::ui

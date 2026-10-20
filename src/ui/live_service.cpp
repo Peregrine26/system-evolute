@@ -21,10 +21,11 @@ namespace {
 constexpr int kMinWidth = 160;
 constexpr int kMinHeight = 90;
 
-// 列表里最多留几个窗口。总览的意义是"一眼看完"，不是把任务管理器抄一遍；
-// 三到四个正好占满左边那条任务栏，也不会让人在一堆后台窗口里找目标。
+// 列表里最多留几个窗口。四个以内平铺，再多就叠起来，所以上限可以放宽；
+// 十张卡已经能盖住绝大多数"我真的开着这么多窗口"的情况，
+// 再多的都是后台进程，列进来只会让人找不着。
 // 超出时按窗口面积从大到小留——面积大的通常才是用户真正在用的那个。
-constexpr int kMaxWindows = 4;
+constexpr int kMaxWindows = 10;
 
 QString fromWide(const std::wstring& text) {
     return QString::fromStdWString(text);

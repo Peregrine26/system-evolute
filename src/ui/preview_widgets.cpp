@@ -184,27 +184,27 @@ void ThumbnailSlot::paintEvent(QPaintEvent*) {
         painter.drawPixmap(content.center().toPoint() - QPoint(scaled.width() / 2, scaled.height() / 2),
                            scaled);
     } else if (content.height() > 24 && content.width() > 64) {
-        // 占位：左边一条窄侧栏 + 右边几行短横线。
-        // 比一排通栏长条更像真实应用（编辑器 / 文件管理器），
-        // 又不会假装这里已经有内容。
+        // 占位：左边一条窄侧栏 + 右边一列文本行。
+        // 行数跟着窗口高度走，窗口越大行越多——否则放大到全屏时
+        // 只有三根横线飘在中间，看着比空白还空。
         painter.setPen(Qt::NoPen);
         const qreal sidebar = content.width() * 0.16;
         painter.setBrush(QColor(255, 255, 255, 6));
         painter.drawRect(QRectF(content.left(), content.top(), sidebar, content.height()));
 
-        const qreal lineLeft = content.left() + sidebar + content.width() * 0.06;
-        const qreal maxWidth = content.width() - sidebar - content.width() * 0.12;
-        for (int i = 0; i < 4; ++i) {
-            const qreal y = content.top() + content.height() * (0.14 + i * 0.2);
-            if (y + 8 > content.bottom()) {
+        const qreal lineLeft = content.left() + sidebar + content.width() * 0.05;
+        const qreal maxWidth = content.width() - sidebar - content.width() * 0.1;
+        const qreal lineHeight = qBound(3.0, content.height() * 0.012, 7.0);
+        const int lineCount = qBound(3, static_cast<int>(content.height() / 58), 16);
+        for (int i = 0; i < lineCount; ++i) {
+            const qreal y = content.top() + 18 + i * 58.0;
+            if (y + lineHeight > content.bottom() - 10) {
                 break;
             }
-            const qreal widthRatio = (i % 3 == 2) ? 0.55 : 0.92;
+            // 长短交替，看起来像段落，而不是尺子刻度。
+            const qreal ratio = (i % 5 == 2) ? 0.42 : (i % 5 == 4 ? 0.66 : 0.94);
             painter.setBrush(QColor(255, 255, 255, 12));
-            painter.drawRoundedRect(
-                QRectF(lineLeft, y, maxWidth * widthRatio,
-                       qBound(2.0, content.height() * 0.035, 6.0)),
-                2, 2);
+            painter.drawRoundedRect(QRectF(lineLeft, y, maxWidth * ratio, lineHeight), 2, 2);
         }
     }
 
@@ -310,6 +310,28 @@ void LayoutPreview::showArrangement(const QRect& workArea,
     update();
 }
 
+void LayoutPreview::showSingle(const QRect& workArea, const WindowItem& window) {
+    m_workArea = workArea;
+    m_highlighted.clear();
+    m_badges.clear();
+    m_items.clear();
+    m_rects.clear();
+
+    if (window.hasBounds) {
+        // 给的是整块可用区域，不是窗口原来的位置：右栏要的是"这个窗口放大看"，
+        // 不是"它现在在屏幕的哪个角落"。
+        const QRect area = (workArea.isValid() && workArea.width() > 0 && workArea.height() > 0)
+                               ? workArea
+                               : QRect(0, 0, 1920, 1080);
+        m_items.push_back(window);
+        m_rects.push_back(area);
+    }
+
+    updateFrame();
+    applyLayout();
+    update();
+}
+
 void LayoutPreview::clear() {
     m_items.clear();
     m_rects.clear();
@@ -394,8 +416,12 @@ void LayoutPreview::applyLayout() {
         const QRect target = m_rects.at(i);
 
         // 目标矩形 -> 画布坐标。窗口本体要在投影内缩进之后仍落在 target 上，
-        // 所以这里把几何按投影宽度外扩一圈。
-        const int pad = qBound(0, qMin(target.width(), target.height()) / 6, kShadowPad);
+        // 所以这里把几何按投影宽度外扩一圈；占满整块屏幕时不留投影，
+        // 否则画面四周会多出一指宽的黑边。
+        const bool fillsScreen = (m_items.size() == 1 && target == m_area);
+        const int pad = fillsScreen ? 0
+                                    : qBound(0, qMin(target.width(), target.height()) / 6,
+                                             kShadowPad);
         const QRect mapped(
             m_frame.left() + qRound((target.left() - m_area.left()) * m_scaleX),
             m_frame.top() + qRound((target.top() - m_area.top()) * m_scaleY),

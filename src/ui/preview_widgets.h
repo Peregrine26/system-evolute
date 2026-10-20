@@ -70,6 +70,10 @@ public:
     void showArrangement(const QRect& workArea,
                          const QVector<Placement>& placements,
                          const QVector<WindowItem>& windows);
+
+    // 只显示一个窗口，铺满整块画面：右栏就是"这个窗口现在长什么样"。
+    void showSingle(const QRect& workArea, const WindowItem& window);
+
     void clear();
 
     int paneCount() const;  // 当前真正显示出来的窗口块数

@@ -7,20 +7,16 @@
 #include <QVector>
 #include <QWidget>
 
-#include <functional>
-
 class QGraphicsOpacityEffect;
 class QLabel;
-class QListWidget;
-class QListWidgetItem;
-class QPushButton;
-class QRadioButton;
+class QShowEvent;
 
 namespace crossdesk::ui {
 
+class CardStack;
 class LayoutPreview;
 
-// 主窗口：左边一条任务栏，右边一整块主屏幕画面，铺满整个显示器。
+// 主窗口：左边一摞窗口卡，右边是选中的那个窗口，铺满整个显示器。
 //
 // 两条硬规则写在代码里，答辩时可以直接指着讲：
 //   1. 界面只认 CrossDeskService，不 include windows.h，不自己算窗口归属；
@@ -39,8 +35,7 @@ public:
     // 收起：Esc 或全局热键触发。
     void collapse();
 
-    bool isAnimating() const { return m_animating; }
-    bool isArranging() const { return m_arranging; }
+    WindowId selectedWindow() const { return m_selected; }
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -52,63 +47,30 @@ private:
     void connectService();
 
     void applyWindows();
-    void rebuildList();
-    QString textFor(const WindowItem& window) const;
-    void refreshRow(WindowId id);
-    void updateActionStates();
-    void updateScene();
-    void fitRows();
-    void layoutOverlay();
-
-    void onItemChanged(QListWidgetItem* item);
+    void onCardClicked(WindowId id);
+    void onCardActivated(WindowId id);  // 双击 = 把真实窗口切到前台
     void onRefresh();
     void onActivate();
-    void onConfirm();
-    void onBack();
-    void onModeChanged();
-    void onOperationFinished(const OperationResult& result);
 
-    void enterArrangement();
-    void leaveArrangement();
-    bool buildPlacements();
-    void finishConfirm();
-    LayoutMode currentMode() const;
-
-    // 画面切换动画：先淡出，在透明的那一瞬间换数据，再淡入。
-    void fadeScene(const std::function<void()>& swap);
-
+    void showSelected(bool animate = true);
     void setStatus(const QString& text, bool error = false);
+    void layoutStatus();
 
     const WindowItem* findWindow(WindowId id) const;
 
     CrossDeskService* m_service = nullptr;
     QVector<WindowItem> m_windows;
-    QVector<WindowId> m_checked;  // 按勾选先后排序，最多两个
-    QVector<Placement> m_placements;
+    WindowId m_selected = 0;
     QHash<WindowId, QString> m_failures;
 
-    QListWidget* m_list = nullptr;
-    LayoutPreview* m_canvas = nullptr;  // 右侧整块主屏幕
-
-    // 浮在画面上的操作条：不占布局，没得点的时候整条隐藏。
-    QWidget* m_actionBar = nullptr;
-    QPushButton* m_activateButton = nullptr;
-    QPushButton* m_confirmButton = nullptr;
-    QPushButton* m_backButton = nullptr;
-    QRadioButton* m_equalRadio = nullptr;
-    QRadioButton* m_masterRadio = nullptr;
+    CardStack* m_cards = nullptr;
+    LayoutPreview* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
-
     QGraphicsOpacityEffect* m_sceneEffect = nullptr;
 
-    bool m_syncingChecks = false;  // 防止程序改勾选状态时递归触发 itemChanged
-    bool m_animating = false;      // 动画期间不接受新命令，避免重复触发
-    bool m_arranging = false;      // 当前画面是"排列预览"还是"桌面总览"
     bool m_allowHide = false;
     bool m_firstShow = true;
     bool m_statusTakenByRefresh = false;
-    int m_confirmPending = 0;
-    int m_confirmFailures = 0;
 };
 
 }  // namespace crossdesk::ui

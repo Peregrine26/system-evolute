@@ -37,8 +37,8 @@ if(CROSSDESK_BUILD_GUI)
         src/ui/fake_service.cpp
         src/ui/preview_widgets.h
         src/ui/preview_widgets.cpp
-        src/ui/window_row_delegate.cpp
-        src/ui/window_row_delegate.h
+        src/ui/window_cards.h
+        src/ui/window_cards.cpp
         src/ui/main_window.h
         src/ui/main_window.cpp
     )

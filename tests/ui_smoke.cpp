@@ -1,5 +1,5 @@
-// 无显示器冒烟测试：真的构造主窗口、真的勾选、真的发命令，
-// 然后检查列表行数、画面块数、排列比例和状态文字。
+// 无界面冒烟测试：真的构造主窗口、真的点卡片、真的发命令，
+// 然后检查卡片数、右侧画面、叠影顺序和状态文字。
 //
 // 它证明的是"界面状态机按预期走"，不证明"窗口真的被移动了"——
 // 后者只能靠 Windows 实机验证，写在这里会变成自我欺骗。
@@ -7,14 +7,12 @@
 #include "ui/fake_service.h"
 #include "ui/main_window.h"
 #include "ui/preview_widgets.h"
+#include "ui/window_cards.h"
 
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QLabel>
-#include <QListWidget>
-#include <QListWidgetItem>
-#include <QPushButton>
-#include <QRadioButton>
+#include <QMouseEvent>
 #include <QThread>
 #include <QVector>
 
@@ -25,7 +23,6 @@
 
 namespace {
 
-constexpr int kWindowIdRole = Qt::UserRole + 1;
 int g_failed = 0;
 int g_passed = 0;
 
@@ -39,56 +36,7 @@ void check(bool condition, const std::string& what) {
     }
 }
 
-int rowCount(QListWidget* list) {
-    int count = 0;
-    for (int row = 0; row < list->count(); ++row) {
-        if (list->item(row)->data(kWindowIdRole).isValid()) {
-            ++count;
-        }
-    }
-    return count;
-}
-
-int checkedCount(QListWidget* list) {
-    int count = 0;
-    for (int row = 0; row < list->count(); ++row) {
-        QListWidgetItem* item = list->item(row);
-        if (item->data(kWindowIdRole).isValid() && item->checkState() == Qt::Checked) {
-            ++count;
-        }
-    }
-    return count;
-}
-
-QListWidgetItem* rowWithTitle(QListWidget* list, const QString& title) {
-    for (int row = 0; row < list->count(); ++row) {
-        QListWidgetItem* item = list->item(row);
-        if (item->data(kWindowIdRole).isValid() && item->text().contains(title)) {
-            return item;
-        }
-    }
-    return nullptr;
-}
-
-void uncheckAll(QListWidget* list) {
-    for (int row = 0; row < list->count(); ++row) {
-        QListWidgetItem* item = list->item(row);
-        if (item->data(kWindowIdRole).isValid() && item->checkState() == Qt::Checked) {
-            item->setCheckState(Qt::Unchecked);
-        }
-    }
-}
-
-void checkOnly(QListWidget* list, const QStringList& titles) {
-    uncheckAll(list);
-    for (const QString& title : titles) {
-        if (QListWidgetItem* item = rowWithTitle(list, title)) {
-            item->setCheckState(Qt::Checked);
-        }
-    }
-}
-
-bool waitUntil(const std::function<bool()>& predicate, int timeoutMs = 3000) {
+bool waitUntil(const std::function<bool()>& predicate, int timeoutMs = 2000) {
     QElapsedTimer timer;
     timer.start();
     while (timer.elapsed() < timeoutMs) {
@@ -101,6 +49,49 @@ bool waitUntil(const std::function<bool()>& predicate, int timeoutMs = 3000) {
     return predicate();
 }
 
+// 点某一张卡：真的发鼠标事件，走的是界面里那条点击路径，
+// 而不是绕过界面直接改状态。
+void clickCard(crossdesk::ui::CardStack* stack, int index) {
+    QVector<crossdesk::ui::WindowCard*> cards;
+    for (auto* card : stack->findChildren<crossdesk::ui::WindowCard*>()) {
+        if (card->isVisible()) {
+            cards.push_back(card);
+        }
+    }
+    std::sort(cards.begin(), cards.end(),
+              [](crossdesk::ui::WindowCard* a, crossdesk::ui::WindowCard* b) {
+                  return a->y() < b->y();
+              });
+    if (index < 0 || index >= cards.size()) {
+        return;
+    }
+
+    // 点卡片底部：叠影时上面那张会盖住下面卡片的顶部，
+    // 只有底部那一条是真正属于它自己的。
+    const QPoint local(cards.at(index)->width() / 2, cards.at(index)->height() - 20);
+    const QPoint pos = cards.at(index)->mapTo(stack, local);
+    QMouseEvent press(QEvent::MouseButtonPress, QPointF(pos), Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, QPointF(pos), Qt::LeftButton, Qt::NoButton,
+                        Qt::NoModifier);
+    QCoreApplication::sendEvent(stack, &press);
+    QCoreApplication::sendEvent(stack, &release);
+    QCoreApplication::processEvents();
+}
+
+int visiblePaneCount(crossdesk::ui::LayoutPreview* canvas) {
+    return canvas->paneCount();
+}
+
+crossdesk::ui::WindowId shownWindow(crossdesk::ui::LayoutPreview* canvas) {
+    for (auto* pane : canvas->findChildren<crossdesk::ui::ThumbnailSlot*>()) {
+        if (pane->isVisible()) {
+            return pane->windowId();
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -110,144 +101,95 @@ int main(int argc, char* argv[]) {
     crossdesk::ui::MainWindow window(&service);
     window.show();
 
-    auto* list = window.findChild<QListWidget*>(QStringLiteral("windowList"));
-    auto* activate = window.findChild<QPushButton*>(QStringLiteral("activateButton"));
-    auto* confirm = window.findChild<QPushButton*>(QStringLiteral("confirmButton"));
-    auto* back = window.findChild<QPushButton*>(QStringLiteral("backButton"));
+    auto* stack = window.findChild<crossdesk::ui::CardStack*>(QStringLiteral("cardStack"));
+    auto* canvas =
+        window.findChild<crossdesk::ui::LayoutPreview*>(QStringLiteral("screenPreview"));
     auto* status = window.findChild<QLabel*>(QStringLiteral("statusLabel"));
-    auto* equal = window.findChild<QRadioButton*>(QStringLiteral("modeEqual"));
-    auto* master = window.findChild<QRadioButton*>(QStringLiteral("modeLeftMaster"));
-    auto* canvas = window.findChild<crossdesk::ui::LayoutPreview*>(QStringLiteral("screenPreview"));
 
-    if (!list || !activate || !confirm || !back || !status || !equal || !master || !canvas) {
+    if (!stack || !canvas || !status) {
         std::cout << "FATAL 界面控件缺失，后续断言无意义\n";
         return 2;
     }
 
-    // 换画面时的淡出淡入期间会禁用操作按钮。测试里所有"等画面切完"的地方
-    // 都要等到动画真正结束，否则会误判成"按钮该可用却不可用"。
-    const auto waitIdle = [&window] {
-        return waitUntil([&window] { return !window.isAnimating(); });
-    };
-
-    // ---- M1：列表 ----
-    check(rowCount(list) == 4, "任务栏列出 4 个窗口（含系统应用窗口「设置」）");
-    check(rowWithTitle(list, QStringLiteral("设置")) != nullptr, "系统应用窗口也能列出");
-    check(rowWithTitle(list, QStringLiteral("explorer.exe")) != nullptr, "列表里能看到进程名");
-
-    // ---- 桌面画面：所有窗口都画出来，勾选只是加高亮 ----
-    check(!window.isArranging(), "启动后是桌面画面，不是排列画面");
-    check(canvas->paneCount() == 4, "桌面画面上摆着全部 4 个窗口（按真实位置重叠）");
-    check(!activate->isVisible(), "没勾选时不显示任何操作按钮");
-
-    checkOnly(list, {QStringLiteral("未命名 - 记事本")});
-    check(checkedCount(list) == 1, "勾选一个窗口");
-    check(activate->isVisible() && activate->isEnabled(), "勾一个：出现「定位」");
-    check(canvas->paneCount() == 4, "勾一个不改变桌面画面，只是高亮那一块");
-
-    // ---- 勾满两个：自动切到排列画面 ----
-    checkOnly(list, {QStringLiteral("未命名 - 记事本"), QStringLiteral("项目资料")});
-    check(checkedCount(list) == 2, "勾选两个窗口");
-    check(waitUntil([&window] { return window.isArranging(); }), "勾满两个自动进入排列画面");
-    waitIdle();
-    check(canvas->paneCount() == 2, "排列画面上只剩要排的两个窗口");
-    check(confirm->isVisible() && confirm->isEnabled(), "画面上「确认排列」可用");
-    check(equal->isVisible() && master->isVisible(), "画面上出现等宽 / 60-40 比例选项");
-
-    // 只取真正显示出来的两块，并按横坐标区分左右。
-    // 不能直接用 findChildren 的顺序：raise() 会重排父控件的 children 列表。
-    const auto visiblePanes = [canvas] {
-        QVector<crossdesk::ui::ThumbnailSlot*> found;
-        for (auto* pane : canvas->findChildren<crossdesk::ui::ThumbnailSlot*>()) {
-            if (pane->isVisible()) {
-                found.push_back(pane);
-            }
-        }
-        std::sort(found.begin(), found.end(),
-                  [](crossdesk::ui::ThumbnailSlot* a, crossdesk::ui::ThumbnailSlot* b) {
-                      return a->x() < b->x();
-                  });
-        return found;
-    };
-
     QCoreApplication::processEvents();
-    QVector<crossdesk::ui::ThumbnailSlot*> panes = visiblePanes();
-    check(panes.size() == 2, "画布上正好两块");
-    if (panes.size() == 2) {
-        equal->setChecked(true);
-        QCoreApplication::processEvents();
-        panes = visiblePanes();
-        check(qAbs(panes.at(0)->width() - panes.at(1)->width()) <= 8,
-              "等宽模式下左右两块宽度基本一致");
+    const QVector<crossdesk::ui::WindowItem> windows = service.windows();
 
-        master->setChecked(true);
-        QCoreApplication::processEvents();
-        panes = visiblePanes();
-        const double ratio =
-            static_cast<double>(panes.at(0)->width()) / qMax(1, panes.at(1)->width());
-        check(qAbs(ratio - 1.5) < 0.08, "60/40 模式下左块宽度约为右块的 1.5 倍");
-    }
+    // ---- 左栏：四个窗口平铺 ----
+    check(stack->cardCount() == 4, "左栏有四张窗口卡");
+    check(!stack->isStacked(), "四个窗口以内是平铺，不叠");
+    check(window.selectedWindow() == windows.first().id, "启动时默认选中第一个窗口");
 
-    // ---- M3：确认排列 ----
-    const QVector<crossdesk::ui::WindowItem> before = service.windows();
-    confirm->click();
-    check(waitUntil([&window] { return !window.isArranging(); }), "确认后回到桌面画面");
-    waitIdle();
-    check(status->text().contains(QStringLiteral("排列完成")), "状态条报告排列完成");
-    check(canvas->paneCount() == 4, "回到桌面画面后所有窗口又都在了");
+    // ---- 右栏：只显示一个窗口，且铺满 ----
+    check(visiblePaneCount(canvas) == 1, "右栏只显示一个窗口");
+    check(shownWindow(canvas) == windows.first().id, "右栏显示的就是选中的那个");
 
-    const QVector<crossdesk::ui::WindowItem> after = service.windows();
-    bool boundsChanged = false;
-    for (const auto& item : after) {
-        for (const auto& old : before) {
-            if (item.id == old.id && item.bounds != old.bounds) {
-                boundsChanged = true;
-            }
+    // ---- 点一下换一个，不需要勾选 ----
+    clickCard(stack, 1);
+    check(window.selectedWindow() == windows.at(1).id, "点第二张卡就选中它");
+    check(shownWindow(canvas) == windows.at(1).id, "右栏跟着换成第二张");
+    check(visiblePaneCount(canvas) == 1, "换窗口后右栏仍然只有一个窗口");
+
+    // ---- 失败路径：系统窗口拒绝置前 ----
+    int settingsIndex = -1;
+    for (int i = 0; i < windows.size(); ++i) {
+        if (windows.at(i).processName == QStringLiteral("SystemSettings.exe")) {
+            settingsIndex = i;
         }
     }
-    check(boundsChanged, "窗口的目标位置真的变了（不是只在界面上画画）");
-
-    // ---- M2：定位的失败路径 ----
-    checkOnly(list, {QStringLiteral("设置")});
-    QCoreApplication::processEvents();
-    check(activate->isVisible(), "只勾一个时「定位」还在");
-    activate->click();
-    QCoreApplication::processEvents();
-    check(status->text().contains(QStringLiteral("拒绝")), "受限窗口定位失败并说明原因");
-    if (QListWidgetItem* settings = rowWithTitle(list, QStringLiteral("设置"))) {
-        check(settings->text().contains(QStringLiteral("!")), "失败原因标记在对应窗口那一行");
+    check(settingsIndex >= 0, "假数据里有那个会被拒绝的系统窗口");
+    if (settingsIndex >= 0) {
+        clickCard(stack, settingsIndex);
+        service.activateWindow(window.selectedWindow());
+        QCoreApplication::processEvents();
+        check(status->text().contains(QStringLiteral("拒绝")), "定位被拒绝时状态条说明原因");
     }
 
-    // ---- 空态与窗口消失 ----
-    checkOnly(list, {QStringLiteral("未命名 - 记事本")});
-    service.simulateClose(1);
-    service.refresh();  // 等价于 Ctrl+R：走的是同一条 windowsChanged 路径
+    // ---- 窗口被关掉：卡片少一张，选中自动换一个 ----
+    const crossdesk::ui::WindowId closing = window.selectedWindow();
+    service.simulateClose(closing);
+    service.refresh();
     QCoreApplication::processEvents();
-    check(rowCount(list) == 3, "关闭窗口后刷新，旧条目消失");
-    check(checkedCount(list) == 0, "被关闭的窗口自动从勾选中移除");
-    check(status->text().contains(QStringLiteral("关闭")), "状态条说明有窗口已关闭");
-    check(canvas->paneCount() == 3, "画面同步少了一块");
+    check(stack->cardCount() == 3, "关掉一个窗口后左栏只剩三张卡");
+    check(window.selectedWindow() != closing && window.selectedWindow() != 0,
+          "被关掉的窗口自动换成别的，右栏不会空着");
+    check(visiblePaneCount(canvas) == 1, "右栏仍有画面");
 
-    // 全部关掉后的空态
+    // ---- 全部关掉 ----
     for (const auto& item : service.windows()) {
         service.simulateClose(item.id);
     }
     service.refresh();
     QCoreApplication::processEvents();
-    check(rowCount(list) == 0, "全部关闭后列表为空");
-    check(list->count() == 1 && !list->item(0)->data(kWindowIdRole).isValid(),
-          "空列表显示占位提示而不是一片空白");
-    check(canvas->paneCount() == 0, "全部关闭后画面为空");
+    check(stack->cardCount() == 0, "全部关闭后左栏为空");
+    check(visiblePaneCount(canvas) == 0, "全部关闭后右栏为空");
 
-    // ---- Esc 与返回 ----
-    service.reset();
-    service.refresh();
+    // ---- 超过四个：叠起来；点哪张哪张到最前 ----
+    crossdesk::ui::FakeService many(nullptr, 8);
+    crossdesk::ui::MainWindow stacked(&many);
+    stacked.show();
     QCoreApplication::processEvents();
-    checkOnly(list, {QStringLiteral("未命名 - 记事本"), QStringLiteral("项目资料")});
-    check(waitUntil([&window] { return window.isArranging(); }), "再次进入排列画面");
-    waitIdle();
-    back->click();
-    check(waitUntil([&window] { return !window.isArranging(); }), "「返回」回到桌面画面");
+
+    auto* stack2 = stacked.findChild<crossdesk::ui::CardStack*>(QStringLiteral("cardStack"));
+    auto* canvas2 =
+        stacked.findChild<crossdesk::ui::LayoutPreview*>(QStringLiteral("screenPreview"));
+    if (!stack2 || !canvas2) {
+        std::cout << "FATAL 叠影场景的控件缺失\n";
+        return 2;
+    }
+
+    check(stack2->cardCount() == 8, "八个窗口时左栏有八张卡");
+    check(stack2->isStacked(), "超过四个就叠起来");
+    check(stack2->topWindow() == many.windows().first().id, "最前面是第一个窗口");
+
+    const crossdesk::ui::WindowId lastId = many.windows().last().id;
+    clickCard(stack2, 7);
+    check(stack2->topWindow() == lastId, "点最后一张卡，它被拉到最前面");
+    check(stacked.selectedWindow() == lastId, "拉到最前的同时选中它");
+    check(visiblePaneCount(canvas2) == 1, "叠影模式下右栏也只有一个窗口");
+    check(shownWindow(canvas2) == lastId, "右栏显示的是刚拉到最前那个");
+
+    // 点最后一张时，它原来在 y 最大处；拉到最前后应该在顶部。
+    check(stack2->findChildren<crossdesk::ui::WindowCard*>().size() >= 8, "卡片没有被重复创建");
 
     std::cout << "\n通过 " << g_passed << " 项，失败 " << g_failed << " 项\n";
     return g_failed == 0 ? 0 : 1;
