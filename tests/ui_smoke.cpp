@@ -115,22 +115,24 @@ int main(int argc, char* argv[]) {
     QCoreApplication::processEvents();
     const QVector<crossdesk::ui::WindowItem> windows = service.windows();
 
-    // ---- 左栏：四张卡平铺填满，第一张背后垫着影子 ----
+    // ---- 左栏：四张卡平铺填满，每张背后都垫着影子 ----
     check(stack->cardCount() == 4, "左栏有四张窗口卡");
     check(!stack->isStacked(), "四个窗口平铺，不叠");
     check(!stack->isCompact(), "四张都完整显示，没有压成标题条");
     check(stack->stackedShift() == 0, "平铺不左右错开");
-    check(stack->shadowLayers() == 3, "第一张卡背后垫了三层影子界面");
+    check(stack->shadowLayers() == 3, "每张卡背后垫了三层影子界面");
+    check(stack->shadowSpan() == 21, "影子往右下共错开 21px");
     check(window.selectedWindow() == windows.first().id, "启动时默认选中第一个窗口");
 
     if (stack->cardAt(0) && stack->cardAt(3)) {
         check(stack->cardAt(0)->y() == 12, "第一张贴着上边距");
-        check(stack->cardAt(3)->y() + stack->cardAt(3)->height() <= stack->height() - 12,
-              "最后一张贴着下边距，四张把整条栏填满");
-        check(stack->cardAt(0)->width() == stack->cardAt(3)->width(), "四张一样宽");
+        check(stack->cardAt(3)->geometry().bottom() + stack->shadowSpan() <= stack->height() - 12,
+              "最后一张连同它的影子正好落到下边距，四张把整条栏填满");
+        check(stack->cardAt(0)->size() == stack->cardAt(3)->size(), "第一张和最后一张面积一样");
+        check(stack->cardAt(1)->size() == stack->cardAt(2)->size(), "中间两张面积一样");
         check(stack->cardAt(3)->y() > stack->cardAt(0)->y(), "从上往下排");
-        check(stack->width() - stack->cardAt(0)->geometry().right() - 1 >= 20,
-              "第一张右边留出了影子错开的空间，影子不会被裁掉");
+        check(stack->width() - stack->cardAt(0)->geometry().right() - 1 >= stack->shadowSpan(),
+              "每张右边都留出了影子错开的空间，影子不会被裁掉");
     }
 
     // ---- 右栏：只显示一个窗口，且铺满 ----
@@ -143,19 +145,27 @@ int main(int argc, char* argv[]) {
     check(shownWindow(canvas) == windows.at(1).id, "右栏跟着换成第二张");
     check(visiblePaneCount(canvas) == 1, "换窗口后右栏仍然只有一个窗口");
 
-    // ---- 影子界面不是第五个窗口，点它等于点第一张 ----
-    if (stack->cardAt(0)) {
-        const QRect first = stack->cardAt(0)->geometry();
-        // 落在第一张右下角外面的那条缝里：卡片管不到，影子管得到。
-        const QPoint onShadow(first.right() + 6, first.bottom() + 6);
-        QMouseEvent press(QEvent::MouseButtonPress, QPointF(onShadow), Qt::LeftButton,
-                          Qt::LeftButton, Qt::NoModifier);
-        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(onShadow), Qt::LeftButton,
-                            Qt::NoButton, Qt::NoModifier);
-        QCoreApplication::sendEvent(stack, &press);
-        QCoreApplication::sendEvent(stack, &release);
-        QCoreApplication::processEvents();
-        check(window.selectedWindow() == windows.first().id, "点第一张背后的影子，等于点第一张");
+    // ---- 影子界面不是窗口卡，点它等于点它垫着的那张 ----
+    if (stack->cardAt(0) && stack->cardAt(1)) {
+        const auto clickShadowOf = [&](int index) {
+            const QRect card = stack->cardAt(index)->geometry();
+            // 落在卡片右下角外面的那条缝里：卡片管不到，影子管得到。
+            const QPoint onShadow(card.right() + 6, card.bottom() + 6);
+            QMouseEvent press(QEvent::MouseButtonPress, QPointF(onShadow), Qt::LeftButton,
+                              Qt::LeftButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, QPointF(onShadow), Qt::LeftButton,
+                                Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(stack, &press);
+            QCoreApplication::sendEvent(stack, &release);
+            QCoreApplication::processEvents();
+        };
+
+        clickShadowOf(0);
+        check(window.selectedWindow() == windows.at(0).id, "点第一张背后的影子，等于点第一张");
+
+        clickShadowOf(2);
+        check(window.selectedWindow() == windows.at(2).id, "点第三张背后的影子，等于点第三张");
+        check(shownWindow(canvas) == windows.at(2).id, "右栏跟着换成第三张");
         check(stack->cardCount() == 4, "影子不是一张真的卡，卡片数没变");
     }
 
@@ -180,7 +190,7 @@ int main(int argc, char* argv[]) {
     service.refresh();
     QCoreApplication::processEvents();
     check(stack->cardCount() == 3, "关掉一个窗口后左栏只剩三张卡");
-    check(stack->shadowLayers() == 3, "三张时第一张背后仍然垫着影子");
+    check(stack->shadowLayers() == 3, "三张时每张背后仍然垫着影子");
     check(window.selectedWindow() != closing && window.selectedWindow() != 0,
           "被关掉的窗口自动换成别的，右栏不会空着");
     check(visiblePaneCount(canvas) == 1, "右栏仍有画面");
