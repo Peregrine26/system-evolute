@@ -8,6 +8,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# 源码里带中文注释和中文界面文案，全部按 UTF-8 保存。
+# MSVC 默认按系统代码页（简体中文环境是 GBK）读源文件，会把 UTF-8 的多字节
+# 序列拆错，严重时一个中文字节会把行尾的换行吃掉，让下一行代码并进注释，
+# 表现为莫名其妙的 "语法错误: public"。
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 # Qt 的 signals/slots 需要 moc 预处理器。没有这一行，Q_OBJECT 类会在链接阶段
 # 报 "undefined reference to vtable"，这是 Qt 新手第一个必踩的坑。
 set(CMAKE_AUTOMOC ON)
@@ -84,11 +92,14 @@ if(CROSSDESK_BUILD_SCANNER)
 endif()
 
 # 真实窗口数据源：把 A 的扫描器接到界面上，显示真实窗口。
-# 只做扫描和"屏幕可用区域"，置前/设位置等待 A 的命令接口。
+# 查询走 A 的扫描器；命令（置前 / 设位置）走 win32_window_commands，
+# 那是 A 的地盘上的兜底实现，A 接好适配器后删掉即可。
 if(CROSSDESK_BUILD_GUI AND WIN32 AND CROSSDESK_BUILD_SCANNER)
     target_sources(crossdesk_ui PRIVATE
         src/ui/live_service.cpp
         src/ui/live_service.h
+        src/platform/windows/win32_window_commands.cpp
+        src/platform/windows/win32_window_commands.h
     )
     target_link_libraries(crossdesk_ui PUBLIC
         crossdesk_window_scanner_lib
@@ -96,4 +107,17 @@ if(CROSSDESK_BUILD_GUI AND WIN32 AND CROSSDESK_BUILD_SCANNER)
     )
     # PUBLIC：main.cpp 也要看见这个宏才知道 --live 是否可用
     target_compile_definitions(crossdesk_ui PUBLIC CROSSDESK_HAS_LIVE_SCANNER=1)
+
+    # 平台命令层的真机测试：启动一个真实 crossdesk.exe 当靶子，
+    # 验证 place() 真的改变了窗口矩形、activate() 真的把前台切过去。
+    if(CROSSDESK_BUILD_UI_SMOKE)
+        add_executable(crossdesk_win32_commands_smoke
+            tests/win32_commands_smoke.cpp
+            src/platform/windows/win32_window_commands.cpp
+        )
+        target_include_directories(crossdesk_win32_commands_smoke PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+        )
+        add_test(NAME win32_commands_smoke COMMAND crossdesk_win32_commands_smoke)
+    endif()
 endif()

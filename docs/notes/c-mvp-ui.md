@@ -67,7 +67,46 @@ build\crossdesk.exe --fake
 5. `Ctrl+Enter` → 回总览，状态栏"排列完成"，列表里的窗口位置已更新。
 6. 只勾「设置」→ `Enter`（或点「定位」）→ 红字提示被系统拒绝，该行出现 `!`。
 7. `Esc` 在预览页返回总览；在总览页收起（最小化到任务栏）。
-8. 真实模式：`build\crossdesk.exe`（或 `run.bat`），能看到当前桌面的真实窗口，点「定位」会提示等待 A 的接口。
+8. 真实模式：`build\crossdesk.exe`（或 `run.bat`），能看到当前桌面的真实窗口；勾一个 → `Enter`，目标窗口真的被切到前台；勾两个 → 排列，两个窗口真的被摆到左右。
+
+## 平台命令层（2026-10-20 补）
+
+之前「定位」和「确认排列」在真实模式下只会回一句"等待 A 的接口"，因为 A 的
+`Win32ApiAdapter` 只有查询、没有命令。现在补了一份兜底实现：
+
+| 文件 | 位置 | 归属 |
+| --- | --- | --- |
+| `src/platform/windows/win32_window_commands.*` | 平台层 | **A 的地盘**，A 接好适配器后直接删掉 |
+| `src/ui/live_service.cpp` 里的两处调用 | 界面层 | 只调服务接口，没有 windows.h |
+
+三个实现要点（答辩可以直接讲）：
+
+1. **置前要先还原**：`IsIconic()` 判断是否最小化，是就先 `SW_RESTORE`；否则
+   `SetForegroundWindow` 对一个最小化窗口不会产生用户可见的效果。
+2. **前台锁定要兜底**：Windows 只允许"当前前台进程"把前台权交出去，被别的进程
+   抢过焦点就会失败。兜底是 `AttachThreadInput` 临时挂到目标线程的输入队列上，
+   借它的权限完成置前。
+3. **`SetWindowPos` 返回 true 不等于成功**：提权窗口、部分商店应用会"调用成功但
+   拒绝执行"。所以摆位后必须 `GetWindowRect` 回读一次，偏差超过 2px 就判定失败。
+
+真机验证 `tests/win32_commands_smoke.cpp`（7 项断言，全部通过）：
+
+```
+PASS 找到真实目标窗口
+PASS place() 返回成功
+PASS 系统里窗口矩形确实变成了目标值 | left=120 top=140 w=900 h=620
+PASS activate() 返回成功
+PASS 前台窗口确实变成了目标窗口
+PASS 对不存在的句柄返回失败而不是崩溃
+PASS 失败时给出了可读原因
+```
+
+## 构建踩坑：MSVC 必须加 /utf-8
+
+源码里的中文注释是 UTF-8，MSVC 默认按 GBK 读。GBK 把 UTF-8 的多字节序列拆错后，
+严重时一个中文字节会把行尾换行吃掉，让下一行代码并进注释，报出
+`语法错误: "public"` 这种和代码完全对不上的错误。`CMakeLists.txt` 里已加
+`add_compile_options(/utf-8)`，同时保证中文字面量按 UTF-8 存进 exe（否则界面会花）。
 
 ## 三个答辩追问题
 

@@ -1,6 +1,7 @@
 #include "live_service.h"
 
 #include "platform/windows/win32_api_adapter.h"
+#include "platform/windows/win32_window_commands.h"
 #include "windows_window_scanner.h"
 
 #include <QCoreApplication>
@@ -19,8 +20,8 @@ namespace {
 constexpr int kMinWidth = 160;
 constexpr int kMinHeight = 90;
 
-QString notWired(const QString& what) {
-    return QStringLiteral("%1需要平台命令接口，当前只接了扫描（等待 A 的接口）。").arg(what);
+QString fromWide(const std::wstring& text) {
+    return QString::fromStdWString(text);
 }
 
 }  // namespace
@@ -28,6 +29,7 @@ QString notWired(const QString& what) {
 LiveService::LiveService(QObject* parent) : CrossDeskService(parent) {
     m_api = std::make_unique<crossdesk::Win32ApiAdapter>();
     m_scanner = std::make_unique<crossdesk::WindowsWindowScanner>(*m_api);
+    m_commands = std::make_unique<crossdesk::Win32WindowCommands>();
     m_selfPid = static_cast<std::uint32_t>(QCoreApplication::applicationPid());
 
     // 屏幕可用区域先用 Qt 的查询顶替，等 A 提供与窗口位置同坐标系的接口后替换。
@@ -88,13 +90,29 @@ void LiveService::refresh() {
 }
 
 void LiveService::activateWindow(WindowId window) {
-    // 这条最容易被误解：界面上点一下"就回到窗口"看起来像 UI 的功劳，
-    // 但真正的置前是 A 的平台命令，界面无权直接调 Win32。
-    emit operationFinished({window, false, notWired(QStringLiteral("定位窗口"))});
+    std::wstring error;
+    const bool ok = m_commands->activate(static_cast<std::uintptr_t>(window), &error);
+
+    if (ok) {
+        // 成功时不要返回"已置前"这种断言太强的话：我们只确认了前台窗口变成了它。
+        emit operationFinished({window, true, QStringLiteral("已切换到目标窗口。")});
+        return;
+    }
+    emit operationFinished({window, false,
+                            QStringLiteral("定位失败：%1").arg(fromWide(error))});
 }
 
-void LiveService::placeWindow(WindowId window, const QRect&) {
-    emit operationFinished({window, false, notWired(QStringLiteral("设置窗口位置"))});
+void LiveService::placeWindow(WindowId window, const QRect& target) {
+    std::wstring error;
+    const bool ok = m_commands->place(static_cast<std::uintptr_t>(window), target.x(),
+                                      target.y(), target.width(), target.height(), &error);
+
+    if (ok) {
+        emit operationFinished({window, true, QStringLiteral("已排列。")});
+        return;
+    }
+    emit operationFinished({window, false,
+                            QStringLiteral("排列失败：%1").arg(fromWide(error))});
 }
 
 }  // namespace crossdesk::ui
