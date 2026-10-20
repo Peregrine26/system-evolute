@@ -31,6 +31,10 @@ constexpr int kWindowIdRole = Qt::UserRole + 1;
 constexpr int kOverviewPage = 0;
 constexpr int kPreviewPage = 1;
 
+// 左侧窗口列表的固定宽度。列表是"挑窗口"的控件，不需要跟着窗口变宽；
+// 右边承担"看窗口"，那部分才应该吃掉所有多余空间。
+constexpr int kListWidth = 300;
+
 }  // namespace
 
 MainWindow::MainWindow(CrossDeskService* service, QWidget* parent)
@@ -45,7 +49,7 @@ MainWindow::MainWindow(CrossDeskService* service, QWidget* parent)
 
 void MainWindow::buildUi() {
     setWindowTitle(QStringLiteral("CrossDesk"));
-    resize(1080, 700);
+    resize(1200, 760);
 
     setStyleSheet(QStringLiteral(
         "QWidget { background:#f5f5f7; color:#1d1d1f; font-size:13px; }"
@@ -142,7 +146,11 @@ QWidget* MainWindow::buildOverviewPage() {
     connect(m_list, &QListWidget::itemChanged, this, &MainWindow::onItemChanged);
     // 回车 / 双击都落到同一条"定位"路径上，和按钮共用命令。
     connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem*) { onActivate(); });
-    body->addWidget(m_list, 3);
+    // 列表只负责"挑窗口"：固定成一条窄栏，多余的宽度全给右边的预览。
+    // 之前给它 stretch 3、预览只有 2，结果列表占了半屏、缩略图被挤成窄条，
+    // 主次正好反了——这个界面里"看"比"挑"更重要。
+    m_list->setFixedWidth(kListWidth);
+    body->addWidget(m_list, 0);
 
     auto* previewColumn = new QVBoxLayout();
     previewColumn->setSpacing(8);
@@ -155,7 +163,7 @@ QWidget* MainWindow::buildOverviewPage() {
     m_slotB->setObjectName(QStringLiteral("thumbnailB"));
     previewColumn->addWidget(m_slotA, 1);
     previewColumn->addWidget(m_slotB, 1);
-    body->addLayout(previewColumn, 2);
+    body->addLayout(previewColumn, 1);
 
     layout->addLayout(body, 1);
     return page;
