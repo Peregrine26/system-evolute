@@ -22,6 +22,8 @@ void print_window(const crossdesk::WindowInfo& window) {
                << window.bounds.top
                << L") " << width << L"x" << height << L"\n";
     std::wcout << L"  Visible: " << (window.visible ? L"yes" : L"no")
+               << L"\n";
+    std::wcout << L"  Minimized: " << (window.minimized ? L"yes" : L"no")
                << L"\n\n";
 }
 
@@ -30,7 +32,12 @@ void print_window(const crossdesk::WindowInfo& window) {
 int wmain() {
     const crossdesk::Win32ApiAdapter api;
     const crossdesk::WindowsWindowScanner scanner(api);
-    const std::vector<crossdesk::WindowInfo> windows = scanner.scan();
+    const crossdesk::WindowScanResult result = scanner.scan_with_status();
+    if (!result.complete) {
+        std::wcerr << L"Window scan failed; results may be incomplete.\n";
+        return 1;
+    }
+    const std::vector<crossdesk::WindowInfo>& windows = result.windows;
 
     std::wcout << L"CrossDesk Windows Window Scanner\n";
     std::wcout << L"Top-level windows found: " << windows.size() << L"\n\n";
