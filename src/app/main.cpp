@@ -52,8 +52,10 @@ int main(int argc, char* argv[]) {
     const QString shotPath = argValue(args, QStringLiteral("--shot"));
     if (!shotPath.isEmpty()) {
         const bool previewShot = args.contains(QStringLiteral("--shot-preview"));
-        QTimer::singleShot(320, &window, [&window, shotPath, previewShot] {
-            if (previewShot) {
+        // --shot-select：只勾两个窗口、留在总览页，用来截"主屏幕摆了两块"的图。
+        const bool selectShot = args.contains(QStringLiteral("--shot-select"));
+        QTimer::singleShot(320, &window, [&window, shotPath, previewShot, selectShot] {
+            if (previewShot || selectShot) {
                 // 截图辅助：从外部操作控件，不往主窗口里加测试专用 API。
                 if (auto* list = window.findChild<QListWidget*>(QStringLiteral("windowList"))) {
                     int checked = 0;
@@ -68,7 +70,9 @@ int main(int argc, char* argv[]) {
                 }
                 if (auto* arrange =
                         window.findChild<QPushButton*>(QStringLiteral("arrangeButton"))) {
-                    arrange->click();
+                    if (previewShot) {
+                        arrange->click();
+                    }
                 }
             }
             const int delay = previewShot ? 420 : 0;

@@ -161,9 +161,10 @@ void LayoutPreview::setPlacements(const QRect& workArea,
     m_placements = placements;
     m_windows = windows;
 
-    if (m_placements.size() < 2) {
+    if (m_placements.isEmpty()) {
         m_left->hide();
         m_right->hide();
+        updateFrame();
         update();
         return;
     }
@@ -178,9 +179,17 @@ void LayoutPreview::setPlacements(const QRect& workArea,
     };
 
     m_left->setWindow(findWindow(m_placements.at(0).id));
-    m_right->setWindow(findWindow(m_placements.at(1).id));
+    if (m_placements.size() > 1) {
+        m_right->setWindow(findWindow(m_placements.at(1).id));
+        m_right->show();
+        m_left->setBadge(QStringLiteral("左"));
+        m_right->setBadge(QStringLiteral("右"));
+    } else {
+        // 只勾了一个窗口：它占满整个可用区域，这时候没有左右之分。
+        m_right->hide();
+        m_left->setBadge(QString());
+    }
     m_left->show();
-    m_right->show();
 
     relayout();
     update();
@@ -193,46 +202,63 @@ void LayoutPreview::clear() {
     m_right->setWindow(nullptr);
     m_left->hide();
     m_right->hide();
+    updateFrame();
     update();
 }
 
 void LayoutPreview::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
+    updateFrame();
     relayout();
 }
 
-void LayoutPreview::relayout() {
-    if (m_placements.size() < 2 || !m_workArea.isValid()) {
-        return;
+void LayoutPreview::updateFrame() {
+    // 屏幕框的尺寸只跟"可用区域"和控件大小有关，跟勾了几个窗口无关。
+    // 之前把它写在 relayout() 里、且 relayout 在不满两个窗口时提前返回，
+    // 结果空状态下 m_frame 是空矩形，整块区域什么都不画——看着像坏了。
+    QRect area = m_workArea;
+    if (!area.isValid() || area.width() <= 0 || area.height() <= 0) {
+        area = QRect(0, 0, 1920, 1080);  // 还没拿到真实可用区域时的示意比例
     }
 
     const int availableWidth = width() - 2 * kPreviewMargin;
     const int availableHeight = height() - 2 * kPreviewMargin;
     if (availableWidth <= 40 || availableHeight <= 40) {
+        m_frame = QRect();
         return;
     }
 
     // 等比缩放，且不放大到超过真实尺寸——否则在 4K 屏上预览会比真实窗口还大，
     // 反而看不出"这两个窗口各占多少"。
-    qreal scale = qMin(static_cast<qreal>(availableWidth) / m_workArea.width(),
-                       static_cast<qreal>(availableHeight) / m_workArea.height());
+    qreal scale = qMin(static_cast<qreal>(availableWidth) / area.width(),
+                       static_cast<qreal>(availableHeight) / area.height());
     scale = qMin(scale, 1.0);
 
-    const int frameWidth = qRound(m_workArea.width() * scale);
-    const int frameHeight = qRound(m_workArea.height() * scale);
+    const int frameWidth = qRound(area.width() * scale);
+    const int frameHeight = qRound(area.height() * scale);
     m_frame = QRect((width() - frameWidth) / 2, (height() - frameHeight) / 2, frameWidth,
                     frameHeight);
+    m_scale = scale;
+    m_area = area;
+}
+
+void LayoutPreview::relayout() {
+    if (m_placements.isEmpty() || !m_area.isValid() || m_frame.isEmpty()) {
+        return;
+    }
 
     // 变量名不能叫 slots：Qt 把 slots 定义成了空宏（Q_OBJECT 的关键字），
     // 用了会得到一堆莫名其妙的 "语法错误: ["。
-    ThumbnailSlot* panes[2] = {m_left, m_right};
-    for (int i = 0; i < 2; ++i) {
-        const QRect& target = m_placements.at(i).rect;
-        const QRect mapped(
-            m_frame.left() + qRound((target.left() - m_workArea.left()) * scale),
-            m_frame.top() + qRound((target.top() - m_workArea.top()) * scale),
-            qRound(target.width() * scale), qRound(target.height() * scale));
-        panes[i]->setGeometry(mapped.adjusted(2, 2, -2, -2));
+    const auto placeAt = [this](ThumbnailSlot* pane, const QRect& target) {
+        const QRect mapped(m_frame.left() + qRound((target.left() - m_area.left()) * m_scale),
+                           m_frame.top() + qRound((target.top() - m_area.top()) * m_scale),
+                           qRound(target.width() * m_scale), qRound(target.height() * m_scale));
+        pane->setGeometry(mapped.adjusted(2, 2, -2, -2));
+    };
+
+    placeAt(m_left, m_placements.at(0).rect);
+    if (m_placements.size() > 1) {
+        placeAt(m_right, m_placements.at(1).rect);
     }
 }
 
@@ -240,23 +266,28 @@ void LayoutPreview::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
+    if (m_frame.isEmpty()) {
+        return;
+    }
+
     const QRectF frame = QRectF(m_frame).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath path;
     path.addRoundedRect(frame, 12, 12);
-    painter.fillPath(path, QColor(QStringLiteral("#ffffff")));
+    // 桌面底色比页面略灰一点，屏幕才不会和背景糊成一片。
+    painter.fillPath(path, QColor(QStringLiteral("#f5f5f7")));
     painter.setPen(QPen(QColor(QStringLiteral("#c7c7cc")), 1, Qt::DashLine));
     painter.drawPath(path);
 
     painter.setPen(QColor(QStringLiteral("#86868b")));
     painter.drawText(QRect(m_frame.left(), qMax(0, m_frame.top() - 26), m_frame.width(), 20),
                      Qt::AlignLeft | Qt::AlignVCenter,
-                     QStringLiteral("屏幕可用区域 %1×%2（预览按比例缩小）")
-                         .arg(m_workArea.width())
-                         .arg(m_workArea.height()));
+                     QStringLiteral("主屏幕可用区域 %1×%2（按比例缩小）")
+                         .arg(m_area.width())
+                         .arg(m_area.height()));
 
-    if (m_placements.size() < 2) {
-        painter.drawText(rect(), Qt::AlignCenter,
-                         QStringLiteral("勾选两个窗口后，这里会显示它们的目标位置"));
+    if (m_placements.isEmpty()) {
+        painter.drawText(m_frame, Qt::AlignCenter,
+                         QStringLiteral("勾选左侧的任务，它的画面会按目标位置摆进这块屏幕"));
     }
 }
 

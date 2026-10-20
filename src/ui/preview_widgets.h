@@ -66,10 +66,13 @@ protected:
     void paintEvent(QPaintEvent* event) override;
 
 private:
+    void updateFrame();
     void relayout();
 
-    QRect m_workArea;
-    QRect m_frame;
+    QRect m_workArea;  // 服务给的可用区域（屏幕坐标）
+    QRect m_area;      // 实际参与比例换算的区域（拿不到真实值时用兜底比例）
+    QRect m_frame;     // 屏幕框在本控件里的矩形
+    qreal m_scale = 1.0;
     QVector<Placement> m_placements;
     QVector<WindowItem> m_windows;
     ThumbnailSlot* m_left = nullptr;

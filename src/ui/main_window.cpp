@@ -2,6 +2,7 @@
 
 #include "layout_math.h"
 #include "preview_widgets.h"
+#include "window_row_delegate.h"
 
 #include <QButtonGroup>
 #include <QColor>
@@ -33,7 +34,7 @@ constexpr int kPreviewPage = 1;
 
 // 左侧窗口列表的固定宽度。列表是"挑窗口"的控件，不需要跟着窗口变宽；
 // 右边承担"看窗口"，那部分才应该吃掉所有多余空间。
-constexpr int kListWidth = 300;
+constexpr int kListWidth = 340;
 
 }  // namespace
 
@@ -143,27 +144,27 @@ QWidget* MainWindow::buildOverviewPage() {
     m_list->setObjectName(QStringLiteral("windowList"));
     m_list->setFocusPolicy(Qt::StrongFocus);
     m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_list->setItemDelegate(new WindowRowDelegate(m_list));
+    m_list->setUniformItemSizes(true);
     connect(m_list, &QListWidget::itemChanged, this, &MainWindow::onItemChanged);
     // 回车 / 双击都落到同一条"定位"路径上，和按钮共用命令。
     connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem*) { onActivate(); });
-    // 列表只负责"挑窗口"：固定成一条窄栏，多余的宽度全给右边的预览。
-    // 之前给它 stretch 3、预览只有 2，结果列表占了半屏、缩略图被挤成窄条，
-    // 主次正好反了——这个界面里"看"比"挑"更重要。
+    // 左边这一列就是"任务栏"：任务名 + 右边紧跟它自己的缩略图。
+    // 固定成一条窄栏，右侧整块空间留给主屏幕。
     m_list->setFixedWidth(kListWidth);
     body->addWidget(m_list, 0);
 
-    auto* previewColumn = new QVBoxLayout();
-    previewColumn->setSpacing(8);
-    auto* caption = new QLabel(QStringLiteral("实时预览"), page);
+    // 右侧 = 主屏幕：一整块缩小版的桌面，勾选的窗口按目标位置实时摆进去。
+    // 不选窗口时它就是一块空的可用区域，不会凭空出现两个卡片。
+    auto* screenColumn = new QVBoxLayout();
+    screenColumn->setSpacing(8);
+    auto* caption = new QLabel(QStringLiteral("主屏幕"), page);
     caption->setProperty("role", "hint");
-    previewColumn->addWidget(caption);
-    m_slotA = new ThumbnailSlot(page);
-    m_slotA->setObjectName(QStringLiteral("thumbnailA"));
-    m_slotB = new ThumbnailSlot(page);
-    m_slotB->setObjectName(QStringLiteral("thumbnailB"));
-    previewColumn->addWidget(m_slotA, 1);
-    previewColumn->addWidget(m_slotB, 1);
-    body->addLayout(previewColumn, 1);
+    screenColumn->addWidget(caption);
+    m_screenPreview = new LayoutPreview(page);
+    m_screenPreview->setObjectName(QStringLiteral("screenPreview"));
+    screenColumn->addWidget(m_screenPreview, 1);
+    body->addLayout(screenColumn, 1);
 
     layout->addLayout(body, 1);
     return page;
@@ -349,30 +350,44 @@ void MainWindow::updateActionStates() {
 }
 
 void MainWindow::updateThumbnails() {
-    // 两个预览位优先显示勾选的窗口；勾不满就按列表顺序补齐，
-    // 这样"总览里同时有两个实时预览"在没勾选时也成立。
-    QVector<const WindowItem*> shown;
-    const auto add = [&shown](const WindowItem* window) {
-        if (!window || shown.size() >= 2) {
-            return;
-        }
-        for (const WindowItem* existing : shown) {
-            if (existing->id == window->id) {
-                return;
-            }
-        }
-        shown.push_back(window);
-    };
-
-    for (WindowId id : m_checked) {
-        add(findWindow(id));
+    // 右侧主屏幕按"勾选了什么"实时反映目标布局：
+    // 没勾 → 一块空屏；勾 1 个 → 占满可用区域；勾 2 个 → 左右各一块。
+    //
+    // 这里只做"预览"，不发命令。用户要先在屏幕上看到结果，再决定是否确认排列。
+    if (m_screenPreview == nullptr) {
+        return;
     }
-    for (const WindowItem& window : m_windows) {
-        add(&window);
+    if (m_checked.isEmpty()) {
+        // 传空 placements 而不是 clear()：clear 会把可用区域一起丢掉，
+        // 空屏上就只能画兜底的 1920×1080，和真实可用区域对不上。
+        m_screenPreview->setPlacements(m_service->workArea(), {}, m_windows);
+        return;
     }
 
-    m_slotA->setWindow(shown.size() > 0 ? shown.at(0) : nullptr);
-    m_slotB->setWindow(shown.size() > 1 ? shown.at(1) : nullptr);
+    if (m_checked.size() == 1) {
+        // 单个窗口不经过 computeLayout：那是 B 的"左右分列"函数，
+        // 按契约只接受两个窗口。这里只是"它会占满整块可用区域"的预览。
+        m_screenPreview->setPlacements(
+            m_service->workArea(), {{m_checked.first(), m_service->workArea()}}, m_windows);
+        return;
+    }
+
+    QVector<QRect> rects;
+    QString error;
+    if (!computeLayout(m_service->workArea(), m_checked.size(), currentMode(), kPaneGap, rects,
+                       &error)) {
+        // 工作区太小、算不出合法矩形：清空预览，具体原因留到点"排列"时再说，
+        // 免得用户在勾选的瞬间就被红字打断。
+        m_screenPreview->clear();
+        return;
+    }
+
+    QVector<Placement> placements;
+    placements.reserve(rects.size());
+    for (int i = 0; i < rects.size(); ++i) {
+        placements.push_back({m_checked.at(i), rects.at(i)});
+    }
+    m_screenPreview->setPlacements(m_service->workArea(), placements, m_windows);
 }
 
 void MainWindow::onRefresh() {
@@ -492,6 +507,9 @@ void MainWindow::onBack() {
         return;
     }
     if (m_pages->currentIndex() == kPreviewPage) {
+        // 回总览时按当前比例重画主屏幕：用户刚在排列页换过 60/40，
+        // 回到总览还得看到同一个结果，否则他会以为比例没生效。
+        updateThumbnails();
         fadeToPage(kOverviewPage);
     }
 }

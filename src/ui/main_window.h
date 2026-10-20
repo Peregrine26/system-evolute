@@ -90,9 +90,8 @@ private:
     QRadioButton* m_equalRadio = nullptr;
     QRadioButton* m_masterRadio = nullptr;
     QLabel* m_statusLabel = nullptr;
-    ThumbnailSlot* m_slotA = nullptr;
-    ThumbnailSlot* m_slotB = nullptr;
-    LayoutPreview* m_preview = nullptr;
+    LayoutPreview* m_screenPreview = nullptr;  // 总览右侧的"主屏幕"
+    LayoutPreview* m_preview = nullptr;        // 排列页的确认预览
     QGraphicsOpacityEffect* m_pageEffect = nullptr;
 
     bool m_syncingChecks = false;   // 防止程序改勾选状态时递归触发 itemChanged

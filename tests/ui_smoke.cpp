@@ -147,6 +147,30 @@ int main(int argc, char* argv[]) {
     check(checkedCount(list) == 2, "勾选两个窗口");
     check(arrange->isEnabled(), "勾两个：排列可用");
 
+    // ---- 主屏幕：勾几个就在屏幕上摆几块 ----
+    auto* screen = window.findChild<crossdesk::ui::LayoutPreview*>(QStringLiteral("screenPreview"));
+    check(screen != nullptr, "总览右侧存在主屏幕");
+    if (screen != nullptr) {
+        QCoreApplication::processEvents();
+        const auto visiblePanes = [screen] {
+            int count = 0;
+            for (crossdesk::ui::ThumbnailSlot* pane :
+                 screen->findChildren<crossdesk::ui::ThumbnailSlot*>()) {
+                if (pane->isVisible()) {
+                    ++count;
+                }
+            }
+            return count;
+        };
+        check(visiblePanes() == 2, "勾两个：主屏幕上有两块");
+        checkOnly(list, {QStringLiteral("未命名 - 记事本")});
+        QCoreApplication::processEvents();
+        check(visiblePanes() == 1, "只勾一个：主屏幕上只留一块");
+        checkOnly(list, {});
+        QCoreApplication::processEvents();
+        check(visiblePanes() == 0, "全部取消：主屏幕回到空白");
+    }
+
     // 勾第三个应当替换最早的，而不是静默失败
     checkOnly(list, {QStringLiteral("未命名 - 记事本"), QStringLiteral("项目资料")});
     if (QListWidgetItem* third = rowWithTitle(list, QStringLiteral("设置"))) {
