@@ -1,4 +1,20 @@
 @echo off
-rem 假数据模式：不依赖 A 的命令接口，可完整演示"勾两个 → 预览 → 确认排列"。
-rem 答辩时先用这个走流程，再用 run.bat 展示真实窗口列表。
-start "" "%~dp0build\crossdesk.exe" --fake
+setlocal
+cd /d "%~dp0"
+if not exist "build\crossdesk.exe" (
+    echo.
+    echo [ERROR] build\crossdesk.exe not found.
+    echo Run the build first, or tell your AI assistant the build folder is missing.
+    echo.
+    pause
+    exit /b 1
+)
+start "" "build\crossdesk.exe" --fake
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Failed to launch crossdesk.exe --fake
+    echo.
+    pause
+    exit /b 1
+)
+endlocal

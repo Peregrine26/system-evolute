@@ -1,4 +1,20 @@
 @echo off
-rem 真实窗口模式（默认）：列表来自 Windows 扫描器，能列出当前桌面上的窗口。
-rem 定位 / 确认排列会提示"等待 A 的接口"——因为那两件事属于 A 的平台命令。
-start "" "%~dp0build\crossdesk.exe"
+setlocal
+cd /d "%~dp0"
+if not exist "build\crossdesk.exe" (
+    echo.
+    echo [ERROR] build\crossdesk.exe not found.
+    echo Run the build first, or tell your AI assistant the build folder is missing.
+    echo.
+    pause
+    exit /b 1
+)
+start "" "build\crossdesk.exe"
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Failed to launch crossdesk.exe
+    echo.
+    pause
+    exit /b 1
+)
+endlocal
