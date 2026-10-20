@@ -20,13 +20,13 @@ constexpr int kCardRadius = 10;
 // 平铺最多铺几张。再多，每张就只剩一条缝了，不如叠起来。
 constexpr int kMaxTiled = 4;
 
-// 第一张卡背后的影子界面：几层、每层往右下错开多少。
+// 卡片之间的缝。
+constexpr int kGap = 10;
+
+// 第一张卡背后的影子：几层、每层往右上错开多少。
 constexpr int kShadowLayers = 3;
-constexpr int kShadowStep = 7;
-// 影子错开的总量。卡片右侧让出这么宽给它，卡片之间也留这么宽的缝；
-// 缝再宽 4px，是让影子底下也能露出一点，不然被下一张完全盖住。
+constexpr int kShadowStep = 10;
 constexpr int kShadowSpan = kShadowLayers * kShadowStep;
-constexpr int kTileGap = kShadowSpan + 4;
 
 const QColor kAccent(0x0a, 0x84, 0xff);
 
@@ -299,24 +299,23 @@ void CardStack::paintEvent(QPaintEvent*) {
     // 左栏自己一层底色，和右边的桌面画面分开，像任务栏挂在一块面板上。
     painter.fillRect(rect(), QColor(0x14, 0x17, 0x1c));
 
-    // ---- 只有第一张卡背后的影子界面 ----
-    // 不是真实窗口，只是几张往右下错开的圆角板，垫在第一张下面。
-    // 为什么只给第一张：它是这一摞里最上面那张，影子代表"它下面还压着一摞"。
-    // 四张都垫就成了四摞纸，反而看不出谁是这一摞的顶。
-    // 画在父控件上，所以一定落在子控件（卡片）下面，只露出右边和下边两条边。
-    if (m_shadowLayers > 0 && !m_cards.isEmpty()) {
+    // ---- 第一张卡背后的影子界面 ----
+    // 三层圆角板，每层往右上错开 10px：卡片被"从这一摞里抽出来"的方向。
+    // 只画第一张的——它是这一摞的顶，影子代表"下面还压着东西"。
+    // 画在父控件上，所以一定在子控件（卡片）下面，只露出右边和上边两条边。
+    if (m_shadowLayers > 0 && !m_shadowBase.isNull()) {
         painter.setRenderHint(QPainter::Antialiasing, true);
-        const QRect base = m_cards.first()->geometry();
-        // 由远及近画：最远的最暗、也最靠右下，近的压在它上面。
+        // 由远及近画：最远的最暗、也最靠右上，近的压在它上面。
         for (int i = m_shadowLayers; i >= 1; --i) {
             const int offset = i * kShadowStep;
             QPainterPath layer;
-            layer.addRoundedRect(QRectF(base).translated(offset, offset), kCardRadius, kCardRadius);
+            layer.addRoundedRect(QRectF(m_shadowBase).translated(offset, -offset), kCardRadius,
+                                 kCardRadius);
             // 亮度随层数递减：远处退进背景里，近的明显一点，叠出厚度。
             const int tone = 0x21 + (m_shadowLayers - i) * 7;
             painter.fillPath(layer, QColor(tone, tone + 5, tone + 11));
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(QColor(255, 255, 255, 30), 1));
+            painter.setPen(QPen(QColor(255, 255, 255, 26), 1));
             painter.drawPath(layer);
         }
     }
@@ -338,85 +337,101 @@ int CardStack::shadowSpan() const {
     return m_shadowLayers > 0 ? kShadowSpan : 0;
 }
 
+// 把第 index 张放到 target：动画版和直给版只差这一处，抽出来省得写三遍。
+void CardStack::placeCard(int index, const QRect& target, bool animated) {
+    WindowCard* card = m_cards.at(index);
+    if (animated && card->geometry() != target) {
+        auto* anim = new QPropertyAnimation(card, "geometry", card);
+        anim->setDuration(170);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        anim->setStartValue(card->geometry());
+        anim->setEndValue(target);
+        // 影子是按"落位"画的：卡片动的时候影子不跟着动，但它被卡片盖住/露出的
+        // 那部分要重画，否则卡片滑回去之后影子还缺一块。
+        connect(anim, &QPropertyAnimation::valueChanged, this, [this] { update(); });
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    } else {
+        card->setGeometry(target);
+    }
+}
+
 void CardStack::relayout(bool animated) {
     const int count = m_windows.size();
     if (count == 0) {
         m_shadowLayers = 0;
-        update();  // 把上一轮留下的影子擦掉
+        m_shadowBase = QRect();
+        update();
         return;
     }
 
-    // 四张以内平铺填满；五张起平铺就只剩一条缝，改成斜着叠。
+    // 四张以内平铺（四张都看得见）；五张起平铺就只剩一条缝，改成带标题的叠影。
     m_stacked = count > kMaxTiled;
     m_compact = false;
 
-    // 上下也留出同样的边：贴着窗口边缘会被切掉圆角和边框，看起来像溢出而不是铺满。
+    // 上下左右都留 12px：贴着边缘会被切掉圆角和边框，看起来像溢出。
     const int inner = this->height() - kMargin * 2;
-
-    // 只有第一张有影子，但右边这一条是四张一起让的：
-    // 只给第一张缩，它会比下面三张窄一截，四张就不是同样的面积了。
-    const int shadowRoom = (!m_stacked && count > 1) ? kShadowSpan : 0;
-    const int width = this->width() - kMargin * 2 - shadowRoom;
-
-    int cardHeight = inner;
-    int step = inner;
-    int shift = 0;
+    const int full = this->width() - kMargin * 2;
 
     if (m_stacked) {
-        // 最前面那张不必高过半栏；往下的这段至少要放得下一条标题条，
-        // 否则下面那张的标题会被上面这张压掉一半。
         const int maxCard = qMin(280, inner / 2);
-        step = qMax(kTextHeight, qMin(inner * 22 / 100, (inner - maxCard) / (count - 1)));
-        cardHeight = inner - (count - 1) * step;
+        int step = qMax(kTextHeight, qMin(inner * 22 / 100, (inner - maxCard) / (count - 1)));
+        int cardHeight = inner - (count - 1) * step;
 
         // 连一条标题都排不下（大约 20 张以上）：不再叠影，退化成一条条标题。
-        // 这时卡片高度就等于行高，相邻两张正好不重叠，字也就不会互相压。
         m_compact = cardHeight < kTextHeight;
         if (m_compact) {
             step = qMax(1, inner / count);
             cardHeight = step;
         }
 
-        // 每深一张往右错一点，像一摞卡片投出来的重影；右边缘对齐，左边一级级往里收。
-        // 横向总量压在栏宽的 40% 以内，否则最后几张会瘦成一条；压缩档不斜。
-        shift = m_compact ? 0 : qBound(4, width * 40 / 100 / (count - 1), 20);
-    } else if (count > 1) {
-        // 平铺：四张等分，缝隙也算在高度里，最后一张连同它的影子正好落到下边。
-        // 缝比影子错开的总量再宽 4px，影子底下才露得出一条完整的边。
-        cardHeight = qMax(60, (inner - kTileGap * (count - 1)) / count);
-        step = cardHeight + kTileGap;
-    }
+        // 每深一张往右错一点；横向总量压在栏宽的 40% 以内，压缩档不斜。
+        m_shift = m_compact ? 0 : qBound(4, full * 40 / 100 / (count - 1), 20);
+        m_step = step;
+        m_shadowLayers = 0;
+        m_shadowBase = QRect();
 
-    m_step = step;
-    m_shift = shift;
-    // 平铺时才有影子界面。斜叠本身就是一摞，再垫影子只是多此一举。
-    m_shadowLayers = (!m_stacked && count > 1) ? kShadowLayers : 0;
+        for (int i = 0; i < count; ++i) {
+            const QRect target(kMargin + i * m_shift, kMargin + i * step, full - i * m_shift,
+                               cardHeight);
+            placeCard(i, target, animated);
+            WindowCard* card = m_cards.at(i);
+            card->setCompact(m_compact);
+            card->setCoverEdge(m_compact ? 0 : cardHeight - step);
+            card->setDepth(m_compact ? 0 : i);
+        }
+    } else {
+        // 平铺：几张等分高度，四张一样大，从上到下把整条栏填满。
+        // 第一张头顶上、右边各让出一条 kShadowSpan 给它的影子，
+        // 让出来的宽度是几张一起让的——只让第一张，它就比别的窄一圈，面积就不一样了。
+        m_shift = 0;
+        m_shadowLayers = count > 1 ? kShadowLayers : 0;
+        const int span = m_shadowLayers > 0 ? kShadowSpan : 0;
+        const int width = full - span;
+        const int top = kMargin + span;
+        const int cardHeight =
+            qMax(60, (this->height() - kMargin - top - kGap * (count - 1)) / count);
+        m_step = cardHeight + kGap;
 
-    const bool dim = m_stacked && !m_compact;
-    for (int i = 0; i < count; ++i) {
-        const QRect target(kMargin + i * shift, kMargin + i * step, width - i * shift, cardHeight);
-        WindowCard* card = m_cards.at(i);
-        card->setCompact(m_compact);
-        card->setCoverEdge(dim ? cardHeight - step : 0);
-        card->setDepth(dim ? i : 0);
-        if (animated && card->geometry() != target) {
-            auto* anim = new QPropertyAnimation(card, "geometry", card);
-            anim->setDuration(160);
-            anim->setEasingCurve(QEasingCurve::OutCubic);
-            anim->setStartValue(card->geometry());
-            anim->setEndValue(target);
-            // 影子是按第一张卡的当前 geometry 画的，卡片在动，父控件也得跟着重画，
-            // 否则影子会停在原地，看起来像脱离了卡片。
-            connect(anim, &QPropertyAnimation::valueChanged, this, [this] { update(); });
-            anim->start(QAbstractAnimation::DeleteWhenStopped);
-        } else {
-            card->setGeometry(target);
+        for (int i = 0; i < count; ++i) {
+            const QRect target(kMargin, top + i * m_step, width, cardHeight);
+            placeCard(i, target, animated);
+            WindowCard* card = m_cards.at(i);
+            card->setCompact(false);
+            card->setOverlapped(false);
+            card->setCoverEdge(0);
+            card->setDepth(0);
+        }
+        // 影子按"第一张的落位"画，不按它当前的位置：拖动时卡片跑开、影子留在原地。
+        m_shadowBase = m_cards.first()->geometry();
+        if (animated) {
+            // 动画还没跑完，geometry 还是旧的；直接用算好的落位。
+            m_shadowBase = QRect(kMargin, top, width, cardHeight);
         }
     }
+
     // i=0 最后 raise，所以它压在最上面：视觉上"第一张在最前面"。
     for (int i = count - 1; i >= 0; --i) {
         m_cards.at(i)->raise();
-        m_cards.at(i)->setOverlapped(dim && i > 0);
     }
     update();
 }
@@ -462,12 +477,9 @@ int CardStack::cardIndexAt(const QPoint& pos) const {
         }
     }
 
-    // 点在影子界面上：那不是另一个窗口，就是第一张卡垫出来的厚度，算点第一张。
-    // 不认这块的话，第一张右下角那一小片点了没反应，像坏了一样。
-    // 后面三张没有影子，它们的右侧就是栏底，点了不该选中任何东西。
-    if (m_shadowLayers > 0 && !m_cards.isEmpty()) {
-        const QRect shadow =
-            m_cards.first()->geometry().adjusted(0, 0, kShadowSpan, kShadowSpan);
+    // 点在影子界面上：那不是另一个窗口，是第一张卡垫出来的厚度，算点第一张。
+    if (m_shadowLayers > 0 && !m_shadowBase.isNull()) {
+        const QRect shadow = m_shadowBase.adjusted(0, -kShadowSpan, kShadowSpan, 0);
         if (shadow.contains(pos)) {
             return 0;
         }
@@ -519,6 +531,7 @@ void CardStack::mouseMoveEvent(QMouseEvent* event) {
         QPoint target = event->pos() + m_dragOffset;
         target.setY(qBound(0, target.y(), height() - card->height()));
         card->move(target);
+        update();  // 卡片让开之后，露出来的影子要重画
     }
 }
 
@@ -539,9 +552,9 @@ void CardStack::mouseReleaseEvent(QMouseEvent* event) {
     const WindowId id = card->windowId();
 
     if (m_stacked && index > 0) {
-        promote(index);  // 点一下或拖出来，都把它放到最前面
+        promote(index);  // 叠影里点一下或拖出来，都把它抽到最前面
     } else {
-        relayout(true);  // 消除拖动留下的位置
+        relayout(true);  // 平铺：拖出来松手后滑回原来的位置
     }
 
     emit windowClicked(id);

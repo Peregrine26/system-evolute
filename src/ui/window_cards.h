@@ -59,13 +59,12 @@ private:
 
 // 左栏的卡片堆。
 //
-// 四张以内平铺：每张等分高度、等宽，四张占的面积一模一样，正好把整条栏填满。
-// 只有第一张卡背后垫几层影子界面——不是真实窗口，只是几张略亮、往右下错开的
-// 圆角板，代表"这一摞下面还压着东西"。另外三张就是普通卡。
+// 四张以内平铺：四张一样大，从上到下把整条栏填满，四张都看得见。
+// 第一张背后垫三层影子界面（往右上错开），代表"它下面还压着一摞"；
+// 影子是画出来的，卡片拖动时跟着走，看起来像从那一摞里抽出来的。
 //
-// 五张起平铺就只剩一条缝了，改成斜着叠：最前那张完整显示，其余每张往下挪一段、
-// 往右错一点，只露出下面那条标题。点哪张哪张就到最前，按住拖动也能把它抽出来。
-// 窗口多到连一条标题都排不下时，退化成一条条标题（`isCompact()`）。
+// 超过四张就平铺不下了，改成一列带标题的叠影：每张往下挪一段，露出下面那条标题，
+// 点或拖都能换到最前。再多到连一条标题都排不下时，退化成一条条标题（`isCompact()`）。
 class CardStack : public QWidget {
     Q_OBJECT
 
@@ -77,10 +76,11 @@ public:
     WindowId selected() const { return m_selected; }
 
     int cardCount() const { return m_cards.size(); }
+    // 超过四张：改成一列带标题的叠影。
     bool isStacked() const { return m_stacked; }
     // 第一张卡背后垫了几层影子界面（0 = 没垫，只在平铺时才有）。
     int shadowLayers() const { return m_shadowLayers; }
-    // 影子往右下错开的总量：卡片右边、下边各要为它留出这么宽。
+    // 影子往右上错开的总量：卡片右边、上边各要为它留出这么宽。
     int shadowSpan() const;
     // 相邻两张的间距（叠影时就是每张露出来的那一条有多高）。
     int stackedStep() const { return m_step; }
@@ -106,6 +106,7 @@ protected:
 private:
     void rebuildCards();
     void relayout(bool animated = false);
+    void placeCard(int index, const QRect& target, bool animated);
     void promote(int index);
     int cardIndexAt(const QPoint& pos) const;
 
@@ -117,6 +118,9 @@ private:
     int m_step = 0;
     int m_shift = 0;
     int m_shadowLayers = 0;
+    // 影子画在哪：第一张卡的"落位"，不是它当前的位置。
+    // 拖动时卡片跑开、影子留在原地，才看得出是从那一摞里抽出来的。
+    QRect m_shadowBase;
 
     int m_pressIndex = -1;
     QPoint m_pressPos;

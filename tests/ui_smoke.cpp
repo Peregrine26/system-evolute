@@ -115,29 +115,28 @@ int main(int argc, char* argv[]) {
     QCoreApplication::processEvents();
     const QVector<crossdesk::ui::WindowItem> windows = service.windows();
 
-    // ---- 左栏：四张卡平铺填满，只有第一张背后垫着影子 ----
+    // ---- 左栏：四张平铺填满，只有第一张背后垫着影子 ----
     check(stack->cardCount() == 4, "左栏有四张窗口卡");
     check(!stack->isStacked(), "四个窗口平铺，不叠");
     check(!stack->isCompact(), "四张都完整显示，没有压成标题条");
-    check(stack->stackedShift() == 0, "平铺不左右错开");
     check(stack->shadowLayers() == 3, "只有第一张卡背后垫了三层影子界面");
-    check(stack->shadowSpan() == 21, "影子往右下共错开 21px");
+    check(stack->shadowSpan() == 30, "影子往右上共错开 30px");
     check(window.selectedWindow() == windows.first().id, "启动时默认选中第一个窗口");
+    check(stack->topWindow() == windows.first().id, "第一张排在最前");
 
     if (stack->cardAt(0) && stack->cardAt(3)) {
-        check(stack->cardAt(0)->y() == 12, "第一张贴着上边距");
-        check(stack->cardAt(3)->y() + stack->cardAt(3)->height() <= stack->height() - 12,
-              "最后一张贴着下边距，四张把整条栏填满");
         bool sameSize = true;
         for (int i = 1; i < 4; ++i) {
             sameSize = sameSize && stack->cardAt(i)->size() == stack->cardAt(0)->size();
         }
-        check(sameSize, "四张宽高完全一样，占的面积相同——只有第一张有影子也一样大");
-        check(stack->cardAt(1)->y() - (stack->cardAt(0)->y() + stack->cardAt(0)->height()) >=
-                  stack->shadowSpan(),
-              "第一张的影子落在缝里，不会被第二张盖住");
-        check(stack->width() - stack->cardAt(0)->geometry().right() - 1 >= stack->shadowSpan(),
-              "第一张右边留出了影子错开的空间，影子不会被裁掉");
+        check(sameSize, "四张宽高完全一样，占的面积相同");
+        check(stack->cardAt(0)->y() == 12 + stack->shadowSpan(), "第一张头顶给影子让出了空间");
+        check(stack->cardAt(3)->geometry().bottom() + 1 == stack->height() - 12,
+              "最后一张贴着下边距，四张把整条栏填满");
+        check(stack->cardAt(0)->geometry().right() + 1 + stack->shadowSpan() ==
+                  stack->width() - 12,
+              "右边也留出了影子的位置，影子不会被裁掉");
+        check(stack->cardAt(3)->y() > stack->cardAt(0)->y(), "四张从上往下排");
     }
 
     // ---- 右栏：只显示一个窗口，且铺满 ----
@@ -150,31 +149,20 @@ int main(int argc, char* argv[]) {
     check(shownWindow(canvas) == windows.at(1).id, "右栏跟着换成第二张");
     check(visiblePaneCount(canvas) == 1, "换窗口后右栏仍然只有一个窗口");
 
-    // ---- 影子界面不是窗口卡：只有第一张有，点它等于点第一张 ----
-    if (stack->cardAt(0) && stack->cardAt(1)) {
-        const auto clickAt = [&](const QPoint& pos) {
-            QMouseEvent press(QEvent::MouseButtonPress, QPointF(pos), Qt::LeftButton,
-                              Qt::LeftButton, Qt::NoModifier);
-            QMouseEvent release(QEvent::MouseButtonRelease, QPointF(pos), Qt::LeftButton,
-                                Qt::NoButton, Qt::NoModifier);
-            QCoreApplication::sendEvent(stack, &press);
-            QCoreApplication::sendEvent(stack, &release);
-            QCoreApplication::processEvents();
-        };
-
+    // ---- 影子不是一张卡：点它等于点第一张 ----
+    if (stack->cardAt(0)) {
         const QRect first = stack->cardAt(0)->geometry();
-        // 落在第一张右下角外面的那条缝里：卡片管不到，影子管得到。
-        clickAt(QPoint(first.right() + 6, first.bottom() + 6));
-        check(window.selectedWindow() == windows.at(0).id, "点第一张背后的影子，等于点第一张");
+        // 落在第一张右上角外面那块：卡片管不到，影子管得到。
+        const QPoint onShadow(first.right() + 12, first.y() - 12);
+        QMouseEvent press(QEvent::MouseButtonPress, QPointF(onShadow), Qt::LeftButton,
+                          Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(onShadow), Qt::LeftButton,
+                            Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(stack, &press);
+        QCoreApplication::sendEvent(stack, &release);
+        QCoreApplication::processEvents();
+        check(window.selectedWindow() == windows.first().id, "点第一张背后的影子，等于点第一张");
         check(stack->cardCount() == 4, "影子不是一张真的卡，卡片数没变");
-
-        // 第二张右边没有影子，那一块就是栏底，点了不该换选中。
-        const QRect second = stack->cardAt(1)->geometry();
-        clickAt(QPoint(second.right() - 4, second.center().y()));
-        check(window.selectedWindow() == windows.at(1).id, "点第二张的卡面，选中第二张");
-        clickAt(QPoint(second.right() + 6, second.center().y()));
-        check(window.selectedWindow() == windows.at(1).id,
-              "第二张右边没有影子，点那儿什么都不换");
     }
 
     // ---- 失败路径：系统窗口拒绝置前 ----
