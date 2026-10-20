@@ -56,6 +56,14 @@ void WindowCard::setOverlapped(bool on) {
     update();
 }
 
+void WindowCard::setCompact(bool on) {
+    if (m_compact == on) {
+        return;
+    }
+    m_compact = on;
+    update();
+}
+
 void WindowCard::setPreview(const QPixmap& pixmap) {
     m_preview = pixmap;
     update();
@@ -80,6 +88,39 @@ void WindowCard::paintEvent(QPaintEvent*) {
     const QRectF card = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath cardPath;
     cardPath.addRoundedRect(card, kCardRadius, kCardRadius);
+
+    // ---- 压缩模式：整张卡就是一条标题 ----
+    // 窗口多到叠影也放不下完整的一条标题时走这里：不画画面区，也不画进程名，
+    // 只留一行标题。再多的窗口也不会出现两行字叠在一起的情况。
+    if (m_compact) {
+        // 一条只有二三十像素高，用大圆角会变成一排药丸，所以这里单独收小。
+        QPainterPath stripPath;
+        stripPath.addRoundedRect(card, 4, 4);
+        painter.fillPath(stripPath, m_selected ? QColor(0x2c, 0x34, 0x43) : QColor(0x20, 0x24, 0x2c));
+
+        const QString title = m_title.isEmpty() ? QStringLiteral("（无标题窗口）") : m_title;
+        QFont titleFont = font();
+        titleFont.setPixelSize(13);
+        titleFont.setBold(m_selected);
+        painter.setFont(titleFont);
+        painter.setPen(m_selected ? QColor(0xf2, 0xf5, 0xf9) : QColor(0xd6, 0xda, 0xe1));
+        const int dotRoom = m_selected ? 22 : 12;
+        painter.drawText(QRectF(12, 0, width() - 12 - dotRoom, height()),
+                         Qt::AlignLeft | Qt::AlignVCenter,
+                         QFontMetrics(titleFont).elidedText(title, Qt::ElideRight,
+                                                           width() - 12 - dotRoom));
+
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(m_selected ? kAccent : QColor(255, 255, 255, 20), m_selected ? 1.6 : 1.0));
+        painter.drawPath(stripPath);
+
+        if (m_selected) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(kAccent);
+            painter.drawEllipse(QPointF(width() - 14, height() / 2.0), 3.0, 3.0);
+        }
+        return;
+    }
 
     painter.fillPath(cardPath, m_selected ? QColor(0x24, 0x2a, 0x35) : QColor(0x1b, 0x1e, 0x25));
 
@@ -267,16 +308,35 @@ void CardStack::relayout(bool animated) {
         for (int i = count - 1; i >= 0; --i) {
             m_cards.at(i)->raise();
             m_cards.at(i)->setOverlapped(false);
+            m_cards.at(i)->setCompact(false);
         }
+        m_compact = false;
+        m_step = height + kGap;
         return;
     }
 
     // 叠起来：最前那张完整显示，其余每张往下挪一小段，只露出下面那行字。
-    const int cardHeight = qBound(180, static_cast<int>(this->height() * 0.34), 280);
-    const int step = count > 1 ? (inner - cardHeight) / (count - 1) : 0;
+    // 关键约束：挪的这段不能小于一条标题条的高度（kTextHeight），否则下面那张的
+    // 标题会被上面这张盖掉一半——窗口越多越糊，20 个的时候两行字直接叠在一起。
+    const int desired = qBound(180, static_cast<int>(this->height() * 0.34), 280);
+    // 要保证 step >= kTextHeight，最前那张最多只能有这么高。
+    const int ceiling = inner - (count - 1) * kTextHeight;
+    int cardHeight = qBound(kTextHeight, ceiling, desired);
+    int step = count > 1 ? (inner - cardHeight) / (count - 1) : 0;
+
+    // 连"一条标题"的高度都排不下（大约 20 个以上）：不再叠影，退化成一条条标题。
+    // 这时卡片高度就等于行高，相邻两张正好不重叠，字也就不会互相压。
+    m_compact = count > 1 && step < kTextHeight;
+    if (m_compact) {
+        step = qMax(1, inner / count);
+        cardHeight = step;
+    }
+    m_step = step;
+
     for (int i = 0; i < count; ++i) {
         QRect target(kMargin, kMargin + i * step, width, cardHeight);
         WindowCard* card = m_cards.at(i);
+        card->setCompact(m_compact);
         if (animated && card->geometry() != target) {
             auto* anim = new QPropertyAnimation(card, "geometry", card);
             anim->setDuration(160);
@@ -291,7 +351,7 @@ void CardStack::relayout(bool animated) {
     // i=0 最后 raise，所以它压在最上面：视觉上"第一张在最前面"。
     for (int i = count - 1; i >= 0; --i) {
         m_cards.at(i)->raise();
-        m_cards.at(i)->setOverlapped(i > 0);
+        m_cards.at(i)->setOverlapped(!m_compact && i > 0);
     }
 }
 

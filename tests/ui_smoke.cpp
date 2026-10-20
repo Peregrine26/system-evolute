@@ -68,7 +68,8 @@ void clickCard(crossdesk::ui::CardStack* stack, int index) {
 
     // 点卡片底部：叠影时上面那张会盖住下面卡片的顶部，
     // 只有底部那一条是真正属于它自己的。
-    const QPoint local(cards.at(index)->width() / 2, cards.at(index)->height() - 20);
+    const int y = qMax(2, cards.at(index)->height() - 20);
+    const QPoint local(cards.at(index)->width() / 2, y);
     const QPoint pos = cards.at(index)->mapTo(stack, local);
     QMouseEvent press(QEvent::MouseButtonPress, QPointF(pos), Qt::LeftButton, Qt::LeftButton,
                       Qt::NoModifier);
@@ -190,6 +191,45 @@ int main(int argc, char* argv[]) {
 
     // 点最后一张时，它原来在 y 最大处；拉到最前后应该在顶部。
     check(stack2->findChildren<crossdesk::ui::WindowCard*>().size() >= 8, "卡片没有被重复创建");
+
+    // ---- 窗口更多：先保证每张还露得出一条完整标题，再多就退化成标题条 ----
+    crossdesk::ui::FakeService sixteen(nullptr, 16);
+    crossdesk::ui::MainWindow crowded(&sixteen);
+    crowded.resize(1536, 960);  // 按 1080p 那种比例算：16 张还排得下完整标题
+    crowded.show();
+    QCoreApplication::processEvents();
+
+    auto* stack3 = crowded.findChild<crossdesk::ui::CardStack*>(QStringLiteral("cardStack"));
+    if (!stack3) {
+        std::cout << "FATAL 十六个窗口场景的控件缺失\n";
+        return 2;
+    }
+    check(stack3->cardCount() == 16, "十六个窗口时左栏有十六张卡");
+    check(stack3->isStacked(), "十六个窗口仍然是叠影");
+    check(!stack3->isCompact(), "十六个窗口还没压到只剩标题");
+    check(stack3->stackedStep() >= 46, "每张露出的那条至少放得下一条标题");
+
+    crossdesk::ui::FakeService lots(nullptr, 32);
+    crossdesk::ui::MainWindow crowdest(&lots);
+    crowdest.show();
+    QCoreApplication::processEvents();
+
+    auto* stack4 = crowdest.findChild<crossdesk::ui::CardStack*>(QStringLiteral("cardStack"));
+    auto* canvas4 =
+        crowdest.findChild<crossdesk::ui::LayoutPreview*>(QStringLiteral("screenPreview"));
+    if (!stack4 || !canvas4) {
+        std::cout << "FATAL 三十二个窗口场景的控件缺失\n";
+        return 2;
+    }
+    check(stack4->cardCount() == 32, "三十二个窗口时左栏有三十二张卡");
+    check(stack4->isCompact(), "一个接一个排不下时退化成标题条");
+    check(stack4->stackedStep() * stack4->cardCount() <= stack4->height(),
+          "标题条全部排在左栏里，不溢出");
+
+    const crossdesk::ui::WindowId midId = lots.windows().at(20).id;
+    clickCard(stack4, 20);
+    check(stack4->topWindow() == midId, "标题条模式下点第 21 条也能换到最前");
+    check(shownWindow(canvas4) == midId, "右栏跟着换成它");
 
     std::cout << "\n通过 " << g_passed << " 项，失败 " << g_failed << " 项\n";
     return g_failed == 0 ? 0 : 1;

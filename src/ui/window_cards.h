@@ -25,6 +25,10 @@ public:
     // 叠影时上面那张会压住这张的顶部，画一道内阴影让层次看得出来。
     void setOverlapped(bool on);
 
+    // 压缩模式：窗口多到连一条标题都排不下时，整张卡退化成一条标题，
+    // 不再画画面区。宁可没有预览，也不能让两行字叠在一起。
+    void setCompact(bool on);
+
     WindowId windowId() const { return m_id; }
     QString title() const { return m_title; }
 
@@ -43,6 +47,7 @@ private:
     QPixmap m_preview;
     bool m_selected = false;
     bool m_overlapped = false;
+    bool m_compact = false;
 };
 
 // 左栏的卡片堆。
@@ -63,6 +68,9 @@ public:
 
     int cardCount() const { return m_cards.size(); }
     bool isStacked() const { return m_stacked; }
+    // 相邻两张的间距（叠影时就是每张露出来的那一条有多高）。
+    int stackedStep() const { return m_step; }
+    bool isCompact() const { return m_compact; }
     // 排在最前的那张（叠影时就是完整露出来的那张）。
     WindowId topWindow() const { return m_cards.isEmpty() ? 0 : m_cards.first()->windowId(); }
 
@@ -88,6 +96,8 @@ private:
     QVector<WindowItem> m_windows;  // 与 m_cards 同序
     WindowId m_selected = 0;
     bool m_stacked = false;
+    bool m_compact = false;
+    int m_step = 0;
 
     int m_pressIndex = -1;
     QPoint m_pressPos;
