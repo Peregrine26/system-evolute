@@ -9,7 +9,7 @@
 namespace crossdesk {
 QtDesktopBridge::QtDesktopBridge(QWidget& main_window) : window_(main_window) {
     // winId forces creation of the top-level native destination.
-    window_.winId();
+    destination_ = static_cast<NativeWindowHandle>(window_.winId());
     qApp->installNativeEventFilter(this);
     window_.installEventFilter(this);
 }
@@ -20,7 +20,7 @@ QtDesktopBridge::~QtDesktopBridge() {
     hotkey_.reset();
 }
 DesktopResult QtDesktopBridge::register_hotkey() {
-    return hotkey_.register_for(static_cast<NativeWindowHandle>(window_.winId()));
+    return hotkey_.register_for(destination_);
 }
 std::vector<DesktopResult> QtDesktopBridge::set_previews(
     const std::vector<std::pair<NativeWindowHandle, QRect>>& regions) {
@@ -33,20 +33,29 @@ std::vector<DesktopResult> QtDesktopBridge::set_previews(
              qRound((rect.x() + rect.width()) * ratio),
              qRound((rect.y() + rect.height()) * ratio)}});
     }
-    return previews_.replace(static_cast<NativeWindowHandle>(window_.winId()), requests);
+    return previews_.replace(destination_, requests);
 }
 void QtDesktopBridge::clear_previews() { previews_.clear(); }
 bool QtDesktopBridge::nativeEventFilter(const QByteArray& type, void* message, qintptr* result) {
     if (type != "windows_generic_MSG" && type != "windows_dispatcher_MSG") return false;
     const auto* msg = static_cast<MSG*>(message);
+    // winId() can create a platform window. Calling it inside a native callback
+    // during destruction/recreation recursively creates more windows.
+    if (msg->message != WM_HOTKEY) return false;
     if (reinterpret_cast<NativeWindowHandle>(msg->hwnd) !=
-        static_cast<NativeWindowHandle>(window_.winId())) return false;
+        destination_) return false;
     if (!hotkey_.handle_message(msg->message, msg->wParam, msg->lParam)) return false;
     if (toggle_overview) toggle_overview();
     if (result) *result = 0;
     return true;
 }
 bool QtDesktopBridge::eventFilter(QObject* object, QEvent* event) {
+    if (object == &window_ && event->type() == QEvent::WinIdChange) {
+        previews_.clear();
+        hotkey_.reset();
+        // internalWinId observes without creating a new native window.
+        destination_ = static_cast<NativeWindowHandle>(window_.internalWinId());
+    }
     if (object == &window_ && (event->type() == QEvent::Hide ||
                               event->type() == QEvent::Close)) previews_.clear();
     return QObject::eventFilter(object, event);

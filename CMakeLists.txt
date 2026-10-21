@@ -97,4 +97,16 @@ if(WIN32 AND CROSSDESK_BUILD_GUI AND CROSSDESK_BUILD_SCANNER)
     target_link_libraries(crossdesk PRIVATE crossdesk_qt_platform)
     add_executable(crossdesk_qt_dwm_demo src/app/qt_dwm_demo.cpp)
     target_link_libraries(crossdesk_qt_dwm_demo PRIVATE crossdesk_qt_platform)
+    if(BUILD_TESTING)
+        add_executable(crossdesk_qt_bridge_lifecycle_test tests/qt_bridge_lifecycle_test.cpp)
+        target_link_libraries(crossdesk_qt_bridge_lifecycle_test PRIVATE crossdesk_qt_platform)
+        target_compile_definitions(crossdesk_qt_bridge_lifecycle_test PRIVATE
+            UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+        add_test(NAME qt_bridge_lifecycle_test COMMAND crossdesk_qt_bridge_lifecycle_test)
+        set_tests_properties(qt_bridge_lifecycle_test PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
+        add_test(NAME qt_dwm_smoke COMMAND crossdesk_qt_dwm_demo --smoke)
+        set_tests_properties(qt_dwm_smoke PROPERTIES
+            LABELS "interactive-desktop" TIMEOUT 15)
+    endif()
 endif()
