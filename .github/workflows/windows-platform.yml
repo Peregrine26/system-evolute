@@ -6,7 +6,10 @@ on:
 
 jobs:
   platform:
-    runs-on: windows-latest
+    # windows-latest 已经漂到没有 VS 2022 的镜像上了，用 "Visual Studio 17 2022"
+    # 生成器的 configure 会直接报 could not find any instance of Visual Studio。
+    # 这条流水线只验平台层，锁 windows-2022 就够。
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Configure without Qt
