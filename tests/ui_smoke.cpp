@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
     check(!stack->isStacked(), "四个窗口平铺，不叠");
     check(!stack->isCompact(), "四张都完整显示，没有压成标题条");
     check(stack->shadowLayers() == 3, "只有第一张卡背后垫了三层影子界面");
-    check(stack->shadowSpan() == 30, "影子往右上共错开 30px");
+    check(stack->shadowSpan() == 30, "影子往右下共错开 30px");
     check(window.selectedWindow() == windows.first().id, "启动时默认选中第一个窗口");
     check(stack->topWindow() == windows.first().id, "第一张排在最前");
 
@@ -130,13 +130,42 @@ int main(int argc, char* argv[]) {
             sameSize = sameSize && stack->cardAt(i)->size() == stack->cardAt(0)->size();
         }
         check(sameSize, "四张宽高完全一样，占的面积相同");
-        check(stack->cardAt(0)->y() == 12 + stack->shadowSpan(), "第一张头顶给影子让出了空间");
+        check(stack->cardAt(0)->y() == 12, "第一张也从顶部边距开始排，不再为影子让位");
         check(stack->cardAt(3)->geometry().bottom() + 1 == stack->height() - 12,
               "最后一张贴着下边距，四张把整条栏填满");
         check(stack->cardAt(0)->geometry().right() + 1 + stack->shadowSpan() ==
                   stack->width() - 12,
-              "右边也留出了影子的位置，影子不会被裁掉");
+              "右边留出了影子的位置，影子不会被裁掉");
         check(stack->cardAt(3)->y() > stack->cardAt(0)->y(), "四张从上往下排");
+    }
+
+    // ---- 鼠标压到外露的影子上：第一张往上提，移开落回去 ----
+    if (stack->cardAt(0)) {
+        const QRect resting = stack->cardAt(0)->geometry();
+        const QPoint onCard = resting.center();
+        QMouseEvent overCard(QEvent::MouseMove, QPointF(onCard), Qt::NoButton, Qt::NoButton,
+                             Qt::NoModifier);
+        QCoreApplication::sendEvent(stack, &overCard);
+        QCoreApplication::processEvents();
+        check(stack->cardAt(0)->y() == resting.y(), "鼠标只是放在卡片身上，不会提起来");
+
+        const QPoint onEdge(resting.right() + 12, resting.y() + resting.height() / 2);
+        QMouseEvent overEdge(QEvent::MouseMove, QPointF(onEdge), Qt::NoButton, Qt::NoButton,
+                             Qt::NoModifier);
+        QCoreApplication::sendEvent(stack, &overEdge);
+        check(stack->isLifted(), "鼠标压到外露的框上，第一张进入提起状态");
+        check(waitUntil([&] { return stack->cardAt(0)->y() == resting.y() - 10; }),
+              "提起动画把第一张往上抬了 10px");
+        check(stack->cardAt(0)->height() == resting.height(), "提起只改 y，卡片高度没变");
+        check(stack->cardAt(0)->x() == resting.x(), "提出去的是正上方，没有左右跑");
+
+        const QPoint away(4, 4);
+        QMouseEvent leaveEdge(QEvent::MouseMove, QPointF(away), Qt::NoButton, Qt::NoButton,
+                              Qt::NoModifier);
+        QCoreApplication::sendEvent(stack, &leaveEdge);
+        check(!stack->isLifted(), "鼠标移开，提起状态结束");
+        check(waitUntil([&] { return stack->cardAt(0)->y() == resting.y(); }),
+              "落回原来的位置，四张又对齐了");
     }
 
     // ---- 右栏：只显示一个窗口，且铺满 ----
@@ -152,8 +181,8 @@ int main(int argc, char* argv[]) {
     // ---- 影子不是一张卡：点它等于点第一张 ----
     if (stack->cardAt(0)) {
         const QRect first = stack->cardAt(0)->geometry();
-        // 落在第一张右上角外面那块：卡片管不到，影子管得到。
-        const QPoint onShadow(first.right() + 12, first.y() - 12);
+        // 落在第一张右边外露的那条影子上：卡片管不到，影子管得到。
+        const QPoint onShadow(first.right() + 12, first.y() + 20);
         QMouseEvent press(QEvent::MouseButtonPress, QPointF(onShadow), Qt::LeftButton,
                           Qt::LeftButton, Qt::NoModifier);
         QMouseEvent release(QEvent::MouseButtonRelease, QPointF(onShadow), Qt::LeftButton,
