@@ -32,9 +32,11 @@ MainWindow::MainWindow(CrossDeskService* service, QWidget* parent)
     buildUi();
     connectService();
     // 先扫一次：真实实现不主动扫描的话，启动时左栏会是空的（看着像坏了）。
-    m_service->refresh();
     applyWindows();
-    setStatus(QStringLiteral("点左边的窗口，右边就显示它。双击可以把窗口切到前台。"));
+    m_service->refresh();
+    if (!m_statusTakenByRefresh) {
+        setStatus(QStringLiteral("点左边的窗口，右边就显示它。双击可以把窗口切到前台。"));
+    }
 }
 
 void MainWindow::buildUi() {
@@ -85,6 +87,7 @@ void MainWindow::connectService() {
     connect(m_service, &CrossDeskService::windowsChanged, this, &MainWindow::applyWindows);
     connect(m_service, &CrossDeskService::operationFinished, this,
             [this](const OperationResult& result) {
+                if (!result.success && result.window == 0) m_statusTakenByRefresh = true;
                 if (result.window != 0) {
                     if (result.success) {
                         m_failures.remove(result.window);
@@ -117,8 +120,9 @@ void MainWindow::applyWindows() {
 
     // 选中的窗口被关掉了：换到第一个，而不是让右边空着——
     // 空画面会让人以为程序坏了。
-    const bool lostSelection = !m_windows.isEmpty() && findWindow(m_selected) == nullptr;
-    if (lostSelection) {
+    const bool needsSelection = !m_windows.isEmpty() && findWindow(m_selected) == nullptr;
+    const bool lostSelection = needsSelection && m_selected != 0;
+    if (needsSelection) {
         m_selected = m_windows.first().id;
     } else if (m_windows.isEmpty()) {
         m_selected = 0;
@@ -127,7 +131,7 @@ void MainWindow::applyWindows() {
     m_cards->setWindows(m_windows);
     m_cards->setSelected(m_selected);
     // 刷新时画面内容没换人，别再淡入一次，否则 Ctrl+R 会闪一下。
-    showSelected(lostSelection);
+    showSelected(needsSelection);
 
     if (lostSelection) {
         m_statusTakenByRefresh = true;
@@ -183,6 +187,7 @@ void MainWindow::onActivate() {
 }
 
 void MainWindow::onRefresh() {
+    m_statusTakenByRefresh = false;
     m_service->refresh();
     if (!m_statusTakenByRefresh) {
         setStatus(QStringLiteral("已刷新，共 %1 个窗口。").arg(m_windows.size()));

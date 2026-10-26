@@ -13,8 +13,8 @@ namespace crossdesk::ui {
 // 现在画的是"标题栏 + 内容占位"——这不是偷懒，而是 M6 明确要求的降级：
 // 拿不到画面时也要能认出是哪个窗口，且不影响其它窗口的显示。
 //
-// A 的 DWM 缩略图接入后，由 A 用 hostHandle() 拿到宿主窗口句柄、用 screenRect()
-// 拿到要填充的屏幕矩形去注册缩略图，然后调 setPreview() 把内容塞进来。
+// A 使用顶层 hostHandle() 和客户区逻辑坐标 previewRect() 注册 DWM。
+// setPreview() 只接收普通 QPixmap，不传递 DWM 关系。
 // UI 不自己截屏，也不 include windows.h。
 class ThumbnailSlot : public QWidget {
     Q_OBJECT
@@ -32,9 +32,11 @@ public:
 
     WindowId windowId() const { return m_id; }
 
-    // 给 A 注册 DWM 缩略图用。第一次调用会创建原生窗口，按需调用。
+    // Top-level destination only; never creates a native child window.
     quintptr hostHandle();
-    QRect screenRect() const;
+    QRect screenRect() const;  // Screen logical coordinates; not a DWM destination.
+    QRect contentRect() const;
+    QRect previewRect() const;  // Top-level client logical pixels for A.
 
 protected:
     void paintEvent(QPaintEvent* event) override;

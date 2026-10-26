@@ -1,6 +1,8 @@
 #include "window_cards.h"
 
 #include <QEasingCurve>
+#include <QApplication>
+#include <QStyleHints>
 #include <QFontMetrics>
 #include <QLinearGradient>
 #include <QMouseEvent>
@@ -99,11 +101,21 @@ void WindowCard::setPreview(const QPixmap& pixmap) {
 }
 
 quintptr WindowCard::hostHandle() {
-    return static_cast<quintptr>(winId());
+    return static_cast<quintptr>(window()->winId());
 }
 
 QRect WindowCard::screenRect() const {
     return QRect(mapToGlobal(QPoint(0, 0)), size());
+}
+
+QRect WindowCard::contentRect() const {
+    if (m_compact || width() <= 24 || height() <= 66) return {};
+    return {12, 12, width() - 24, height() - 66};
+}
+
+QRect WindowCard::previewRect() const {
+    const auto content = contentRect();
+    return content.isEmpty() ? QRect{} : QRect(mapTo(window(), content.topLeft()), content.size());
 }
 
 void WindowCard::paintEvent(QPaintEvent*) {
@@ -345,6 +357,27 @@ void CardStack::paintEvent(QPaintEvent*) {
 }
 
 void CardStack::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() != Qt::LeftButton) {
+        QWidget::mouseDoubleClickEvent(event);
+        return;
+    }
+    // The first release may already have promoted/repositioned the card.
+    // Retain its identity instead of hitting a different card at the old point.
+    const QPoint delta = event->pos() - m_lastClickPos;
+    const int distance = QApplication::styleHints()->mouseDoubleClickDistance();
+    if (m_lastClickId && m_lastClickTimer.isValid() &&
+        m_lastClickTimer.elapsed() <= QApplication::doubleClickInterval() &&
+        qAbs(delta.x()) <= distance && qAbs(delta.y()) <= distance) {
+        const WindowId id = m_lastClickId;
+        m_lastClickId = 0;
+        for (const auto* card : m_cards) {
+            if (card->windowId() == id) {
+                emit windowActivated(id);
+                return;
+            }
+        }
+        return;  // The clicked window disappeared; never activate its replacement.
+    }
     const int index = cardIndexAt(event->pos());
     if (index >= 0) {
         emit windowActivated(m_cards.at(index)->windowId());
@@ -360,6 +393,9 @@ int CardStack::shadowSpan() const {
 // 把第 index 张放到 target：动画版和直给版只差这一处，抽出来省得写三遍。
 void CardStack::placeCard(int index, const QRect& target, bool animated) {
     WindowCard* card = m_cards.at(index);
+    for (auto* anim : card->findChildren<QPropertyAnimation*>(QString(), Qt::FindDirectChildrenOnly)) {
+        if (anim->propertyName() == "geometry") { anim->stop(); anim->deleteLater(); }
+    }
     if (animated && card->geometry() != target) {
         auto* anim = new QPropertyAnimation(card, "geometry", card);
         anim->setDuration(170);
@@ -543,6 +579,12 @@ void CardStack::setLiftTarget(bool on) {
     if (!m_liftAnim) {
         return;
     }
+    if (on && !m_cards.isEmpty()) {
+        for (auto* anim : m_cards.first()->findChildren<QPropertyAnimation*>(
+                 QString(), Qt::FindDirectChildrenOnly)) {
+            if (anim->propertyName() == "geometry") { anim->stop(); anim->deleteLater(); }
+        }
+    }
     m_liftAnim->stop();
     m_liftAnim->setStartValue(m_lift);
     m_liftAnim->setEndValue(on ? 1.0 : 0.0);
@@ -588,6 +630,7 @@ void CardStack::mousePressEvent(QMouseEvent* event) {
         QWidget::mousePressEvent(event);
         return;
     }
+    m_lastClickId = 0;
     const int index = cardIndexAt(event->pos());
     if (index < 0) {
         return;
@@ -607,6 +650,11 @@ void CardStack::mouseMoveEvent(QMouseEvent* event) {
 
     if (!m_dragging && (event->pos() - m_pressPos).manhattanLength() > 6) {
         m_dragging = true;
+        m_liftAnim->stop();
+        for (auto* anim : m_cards.at(m_pressIndex)->findChildren<QPropertyAnimation*>(
+                 QString(), Qt::FindDirectChildrenOnly)) {
+            if (anim->propertyName() == "geometry") { anim->stop(); anim->deleteLater(); }
+        }
         // 拖动时先把它提到最上面，跟着鼠标走，才看得出"被抽出来了"。
         m_cards.at(m_pressIndex)->raise();
         setCursor(Qt::ClosedHandCursor);
@@ -646,6 +694,11 @@ void CardStack::mouseReleaseEvent(QMouseEvent* event) {
 
     WindowCard* card = m_cards.at(index);
     const WindowId id = card->windowId();
+    if (!dragged) {
+        m_lastClickId = id;
+        m_lastClickPos = event->pos();
+        m_lastClickTimer.restart();
+    }
 
     if (m_stacked && index > 0) {
         promote(index);  // 叠影里点一下或拖出来，都把它抽到最前面

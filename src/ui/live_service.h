@@ -12,7 +12,7 @@
 #include <memory>
 
 namespace crossdesk {
-class Win32ApiAdapter;
+class WindowApiAdapter;
 class WindowsWindowScanner;
 class Win32WindowCommands;
 }  // namespace crossdesk
@@ -24,6 +24,7 @@ class LiveService : public CrossDeskService {
 
 public:
     explicit LiveService(QObject* parent = nullptr);
+    explicit LiveService(std::unique_ptr<crossdesk::WindowApiAdapter> api, QObject* parent = nullptr);
     ~LiveService() override;
 
     QVector<WindowItem> windows() const override;
@@ -38,7 +39,7 @@ private:
     QRect m_workArea;
     std::uint32_t m_selfPid = 0;
 
-    std::unique_ptr<crossdesk::Win32ApiAdapter> m_api;
+    std::unique_ptr<crossdesk::WindowApiAdapter> m_api;
     std::unique_ptr<crossdesk::WindowsWindowScanner> m_scanner;
     std::unique_ptr<crossdesk::Win32WindowCommands> m_commands;
 };

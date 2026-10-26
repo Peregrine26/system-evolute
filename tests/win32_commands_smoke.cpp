@@ -34,7 +34,13 @@ std::wstring exeDirectory() {
     return slash == std::wstring::npos ? std::wstring() : full.substr(0, slash);
 }
 
+struct WindowSearch { DWORD process_id; HWND found = nullptr; };
+
 BOOL CALLBACK findCrossDesk(HWND hwnd, LPARAM param) {
+    auto& search = *reinterpret_cast<WindowSearch*>(param);
+    DWORD owner = 0;
+    GetWindowThreadProcessId(hwnd, &owner);
+    if (owner != search.process_id) return TRUE;
     if (!IsWindowVisible(hwnd)) {
         return TRUE;
     }
@@ -43,17 +49,17 @@ BOOL CALLBACK findCrossDesk(HWND hwnd, LPARAM param) {
     if (std::wstring(title).find(L"CrossDesk") == std::wstring::npos) {
         return TRUE;
     }
-    *reinterpret_cast<HWND*>(param) = hwnd;
+    search.found = hwnd;
     return FALSE;
 }
 
-HWND waitForWindow(HWND processWindowHint, int timeoutMs) {
+HWND waitForWindow(DWORD process_id, int timeoutMs) {
     const DWORD deadline = GetTickCount() + static_cast<DWORD>(timeoutMs);
     while (GetTickCount() < deadline) {
-        HWND found = nullptr;
-        EnumWindows(findCrossDesk, reinterpret_cast<LPARAM>(&found));
-        if (found != nullptr) {
-            return found;
+        WindowSearch search{process_id};
+        EnumWindows(findCrossDesk, reinterpret_cast<LPARAM>(&search));
+        if (search.found != nullptr) {
+            return search.found;
         }
         Sleep(100);
     }
@@ -74,7 +80,7 @@ int main() {
     const std::wstring target = dir + L"\\crossdesk.exe";
 
     // 靶子：用真实程序当被测窗口，避免依赖记事本这类随系统版本变化的程序。
-    std::wstring command = L"\"" + target + L"\" --fake";
+    std::wstring command = L"\"" + target + L"\" --fake --windowed";
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
@@ -84,7 +90,19 @@ int main() {
         return 2;
     }
 
-    HWND hwnd = waitForWindow(nullptr, 8000);
+    // A title-matching window owned by this test must never become the target.
+    const HWND decoy = CreateWindowExW(0, L"STATIC", L"CrossDesk decoy", WS_OVERLAPPEDWINDOW,
+                                      30, 30, 300, 200, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    ShowWindow(decoy, SW_SHOWNA);
+    WindowSearch wrong_process{process.dwProcessId};
+    findCrossDesk(decoy, reinterpret_cast<LPARAM>(&wrong_process));
+    check(decoy != nullptr && wrong_process.found == nullptr, "title match from another PID ignored");
+    DestroyWindow(decoy);
+
+    HWND hwnd = waitForWindow(process.dwProcessId, 8000);
+    DWORD owner = 0;
+    if (hwnd) GetWindowThreadProcessId(hwnd, &owner);
+    if (owner != process.dwProcessId) hwnd = nullptr;
     if (hwnd == nullptr) {
         std::printf("FATAL 8 秒内没等到 CrossDesk 窗口\n");
         TerminateProcess(process.hProcess, 0);
@@ -99,14 +117,14 @@ int main() {
     // ---- 设置位置 ----
     {
         std::wstring error;
-        const bool ok = commands.place(reinterpret_cast<std::uintptr_t>(hwnd), 120, 140, 900, 620,
+        const bool ok = commands.place(reinterpret_cast<std::uintptr_t>(hwnd), 120, 140, 1000, 680,
                                        &error);
         check(ok, "place() 返回成功",
               ok ? std::string() : std::string(error.begin(), error.end()));
 
         RECT actual{};
         GetWindowRect(hwnd, &actual);
-        check(rectAlmostEqual(actual, 120, 140, 900, 620), "系统里窗口矩形确实变成了目标值",
+        check(rectAlmostEqual(actual, 120, 140, 1000, 680), "系统里窗口矩形确实变成了目标值",
               "left=" + std::to_string(actual.left) + " top=" + std::to_string(actual.top) +
                   " w=" + std::to_string(actual.right - actual.left) +
                   " h=" + std::to_string(actual.bottom - actual.top));
@@ -131,6 +149,7 @@ int main() {
     }
 
     TerminateProcess(process.hProcess, 0);
+    WaitForSingleObject(process.hProcess, 3000);
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
 

@@ -21,20 +21,18 @@ namespace {
 constexpr int kMinWidth = 160;
 constexpr int kMinHeight = 90;
 
-// 列表里最多留几个窗口。四个以内平铺，再多就叠起来，所以上限可以放宽；
-// 十张卡已经能盖住绝大多数"我真的开着这么多窗口"的情况，
-// 再多的都是后台进程，列进来只会让人找不着。
-// 超出时按窗口面积从大到小留——面积大的通常才是用户真正在用的那个。
-constexpr int kMaxWindows = 10;
-
 QString fromWide(const std::wstring& text) {
     return QString::fromStdWString(text);
 }
 
 }  // namespace
 
-LiveService::LiveService(QObject* parent) : CrossDeskService(parent) {
-    m_api = std::make_unique<crossdesk::Win32ApiAdapter>();
+LiveService::LiveService(QObject* parent)
+    : LiveService(std::make_unique<crossdesk::Win32ApiAdapter>(), parent) {}
+
+LiveService::LiveService(std::unique_ptr<crossdesk::WindowApiAdapter> api, QObject* parent)
+    : CrossDeskService(parent), m_api(std::move(api)) {
+    if (!m_api) m_api = std::make_unique<crossdesk::Win32ApiAdapter>();
     m_scanner = std::make_unique<crossdesk::WindowsWindowScanner>(*m_api);
     m_commands = std::make_unique<crossdesk::Win32WindowCommands>();
     m_selfPid = static_cast<std::uint32_t>(QCoreApplication::applicationPid());
@@ -65,7 +63,12 @@ QRect LiveService::workArea() const {
 }
 
 void LiveService::refresh() {
-    const std::vector<crossdesk::WindowInfo> scanned = m_scanner->scan();
+    const auto scan = m_scanner->scan_with_status();
+    if (!scan.complete) {
+        emit operationFinished({0, false, QStringLiteral("窗口扫描失败，保留上次列表。")});
+        return;
+    }
+    const auto& scanned = scan.windows;
 
     QVector<WindowItem> windows;
     windows.reserve(static_cast<int>(scanned.size()));
@@ -100,17 +103,13 @@ void LiveService::refresh() {
         windows.push_back(item);
     }
 
-    // 只留最大的几个：面积大的通常是用户正在用的主窗口，
-    // 一排小工具窗口挤在前面反而找不到目标。
+    // Sort for display, retaining every valid candidate regardless of count.
     std::stable_sort(windows.begin(), windows.end(),
                      [](const WindowItem& a, const WindowItem& b) {
                          const qint64 areaA = qint64(a.bounds.width()) * a.bounds.height();
                          const qint64 areaB = qint64(b.bounds.width()) * b.bounds.height();
                          return areaA > areaB;
                      });
-    if (windows.size() > kMaxWindows) {
-        windows.resize(kMaxWindows);
-    }
 
     m_windows = windows;
     emit windowsChanged();

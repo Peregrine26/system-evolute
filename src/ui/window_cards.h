@@ -3,6 +3,7 @@
 #include "window_item.h"
 
 #include <QPixmap>
+#include <QElapsedTimer>
 #include <QVector>
 #include <QWidget>
 
@@ -43,6 +44,8 @@ public:
     void setPreview(const QPixmap& pixmap);
     quintptr hostHandle();
     QRect screenRect() const;
+    QRect contentRect() const;
+    QRect previewRect() const;  // Top-level client logical pixels for A.
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -144,6 +147,9 @@ private:
     QPoint m_pressPos;
     QPoint m_dragOffset;
     bool m_dragging = false;
+    WindowId m_lastClickId = 0;
+    QPoint m_lastClickPos;
+    QElapsedTimer m_lastClickTimer;
 };
 
 }  // namespace crossdesk::ui

@@ -98,11 +98,25 @@ void ThumbnailSlot::clearPreview() {
 }
 
 quintptr ThumbnailSlot::hostHandle() {
-    return static_cast<quintptr>(winId());
+    return static_cast<quintptr>(window()->winId());
 }
 
 QRect ThumbnailSlot::screenRect() const {
     return QRect(mapToGlobal(QPoint(0, 0)), size());
+}
+
+QRect ThumbnailSlot::contentRect() const {
+    const int pad = qBound(0, qMin(width(), height()) / 8, kShadowPad);
+    const QRectF box = QRectF(rect()).adjusted(pad + 0.5, pad + 0.5, -pad - 0.5, -pad - 0.5);
+    if (box.width() < 6 || box.height() < 6) return {};
+    const qreal bar = qBound(0.0, box.height() * 0.22, 26.0);
+    return QRectF(box.left(), box.top() + (bar >= 9 ? bar : 0), box.width(),
+                  box.height() - (bar >= 9 ? bar : 0)).toAlignedRect().adjusted(1, 1, -1, -1);
+}
+
+QRect ThumbnailSlot::previewRect() const {
+    const auto content = contentRect();
+    return content.isEmpty() ? QRect{} : QRect(mapTo(window(), content.topLeft()), content.size());
 }
 
 void ThumbnailSlot::paintEvent(QPaintEvent*) {

@@ -301,6 +301,61 @@ int main(int argc, char* argv[]) {
     check(stack4->topWindow() == midId, "标题条模式下点第 21 条也能换到最前");
     check(shownWindow(canvas4) == midId, "右栏跟着换成它");
 
+    // A receives a top-level HWND and client content coordinates, with no child HWND creation.
+    if (stack3->cardAt(0)) {
+        auto* card = stack3->cardAt(0);
+        const auto childId = card->internalWinId();
+        check(card->hostHandle() == static_cast<quintptr>(crowded.winId()), "卡片宿主是顶层窗口");
+        check(card->internalWinId() == childId, "查询卡片宿主不创建子 HWND");
+        check(card->previewRect() == QRect(card->mapTo(&crowded, card->contentRect().topLeft()),
+                                          card->contentRect().size()), "卡片预览使用客户区内容坐标");
+    }
+    for (auto* pane : canvas4->findChildren<crossdesk::ui::ThumbnailSlot*>()) {
+        if (!pane->isVisible()) continue;
+        const auto childId = pane->internalWinId();
+        check(pane->hostHandle() == static_cast<quintptr>(crowdest.winId()), "右侧预览宿主是顶层窗口");
+        check(pane->internalWinId() == childId, "查询预览宿主不创建子 HWND");
+        check(pane->previewRect() == QRect(pane->mapTo(&crowdest, pane->contentRect().topLeft()),
+                                          pane->contentRect().size()), "预览矩形排除标题栏并映射到客户区");
+    }
+    const auto mouse = [](QWidget* target, QEvent::Type type, const QPoint& pos,
+                          Qt::MouseButton button, Qt::MouseButtons buttons) {
+        QMouseEvent event(type, QPointF(pos), QPointF(target->mapToGlobal(pos)), button, buttons,
+                          Qt::NoModifier);
+        QCoreApplication::sendEvent(target, &event);
+    };
+    // The first click promotes the last card before Qt delivers the double click.
+    crossdesk::ui::CardStack doubles;
+    doubles.resize(380, 600);
+    doubles.setWindows(many.windows()); doubles.show(); QCoreApplication::processEvents();
+    auto* last = doubles.cardAt(7);
+    const auto original = last->windowId();
+    const QPoint click = last->mapTo(&doubles, QPoint(last->width()/2, last->height()-20));
+    crossdesk::ui::WindowId activated = 0;
+    QObject::connect(&doubles, &crossdesk::ui::CardStack::windowActivated,
+                     [&](auto id) { activated = id; });
+    mouse(&doubles, QEvent::MouseButtonPress, click, Qt::LeftButton, Qt::LeftButton);
+    mouse(&doubles, QEvent::MouseButtonRelease, click, Qt::LeftButton, Qt::NoButton);
+    waitUntil([&] { return doubles.cardAt(0)->y() == 12; });
+    mouse(&doubles, QEvent::MouseButtonDblClick, click, Qt::LeftButton, Qt::LeftButton);
+    check(activated == original, "重排后双击仍激活第一次点击的窗口");
+
+    crossdesk::ui::FakeService tiles;
+    crossdesk::ui::CardStack hover;
+    hover.resize(380, 600); hover.setWindows(tiles.windows()); hover.show();
+    QCoreApplication::processEvents();
+    const QRect resting = hover.cardAt(0)->geometry();
+    const QPoint begin = resting.center(), end = begin + QPoint(0,30);
+    mouse(&hover, QEvent::MouseButtonPress, begin, Qt::LeftButton, Qt::LeftButton);
+    mouse(&hover, QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton);
+    mouse(&hover, QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton);
+    mouse(&hover, QEvent::MouseMove, QPoint(resting.right()+12, resting.y()+20), Qt::NoButton, Qt::NoButton);
+    check(waitUntil([&] { return hover.cardAt(0)->y() == resting.y()-10; }), "拖放后立即悬停仍会提起");
+    QElapsedTimer settled; settled.start();
+    waitUntil([&] { return settled.elapsed() >= 250; });
+    check(hover.isLifted() && hover.cardAt(0)->y() == resting.y()-10,
+          "回位动画结束后不会覆盖提起结果");
+
     std::cout << "\n通过 " << g_passed << " 项，失败 " << g_failed << " 项\n";
     return g_failed == 0 ? 0 : 1;
 }
