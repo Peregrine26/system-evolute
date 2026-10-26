@@ -22,12 +22,22 @@ int main(int argc, char** argv) {
         if (!condition) std::cerr << description << '\n';
         ok &= condition;
     };
+    int state_notifications = 0;
+    bridge.hotkey_state_changed = [&](crossdesk::DesktopResult state) {
+        ++state_notifications;
+        check(!state.ready(), "offscreen window unexpectedly registered a real hotkey");
+    };
+    bridge.register_hotkey();
+    check(state_notifications == 1 && !bridge.hotkey_state().ready(),
+          "hotkey registration failure was not reported to C");
 
     check(window.internalWinId() != 0, "bridge did not create the initial native window");
     // No real HWND, desktop, hotkey registration or DWM is needed. Reproduce
     // the interval after Qt releases its native window and before recreation.
     window.release_native_window();
     check(window.internalWinId() == 0, "native window was not released");
+    check(state_notifications >= 2 && !bridge.hotkey_state().ready(),
+          "native handle loss was not reported to C");
 
     MSG message{};
     qintptr result = 123;

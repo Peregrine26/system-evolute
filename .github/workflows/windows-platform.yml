@@ -22,6 +22,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout C UI compatibility fixture
+        uses: actions/checkout@v4
+        with:
+          ref: 5de55c0b083c4eb17c936e40aacfdd5b69bfd536
+          path: c-ui-fixture
       - name: Install Qt Widgets
         uses: jurplel/install-qt-action@v4
         with:
@@ -30,7 +35,7 @@ jobs:
           archives: 'qtbase'
           cache: 'true'
       - name: Configure with Qt
-        run: cmake -S . -B build-qt -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=ON
+        run: cmake -S . -B build-qt -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=ON -DCROSSDESK_C_UI_SOURCE_DIR="${{ github.workspace }}/c-ui-fixture"
       - name: Build Qt applications and tests
         run: cmake --build build-qt --config Debug --parallel
       - name: Test without desktop operations
