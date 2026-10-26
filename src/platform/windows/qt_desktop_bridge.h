@@ -30,6 +30,7 @@ protected:
     bool eventFilter(QObject* object, QEvent* event) override;
 private:
     QWidget& window_;
+    NativeWindowHandle destination_ = 0;
     OverviewHotkey hotkey_;
     WindowPreviews previews_;
 };

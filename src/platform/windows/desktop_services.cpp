@@ -66,7 +66,8 @@ void WindowPreviews::refresh() {
     entries.erase(std::remove_if(entries.begin(), entries.end(), [](const auto& entry) {
         DWORD process = 0;
         const DWORD thread = GetWindowThreadProcessId(entry.source, &process);
-        if (!IsWindow(entry.source) || !IsWindow(entry.destination) ||
+        if (!IsWindow(entry.source) || !IsWindowVisible(entry.source) ||
+            !IsWindow(entry.destination) ||
             process != entry.process || thread != entry.thread) {
             DwmUnregisterThumbnail(entry.thumbnail);
             return true;
@@ -81,7 +82,8 @@ std::vector<DesktopResult> WindowPreviews::replace(
     const auto target = hwnd(destination);
     for (const auto& request : requests) {
         const auto source = hwnd(request.source);
-        if (!own_top_level(target) || !IsWindow(source) || source == target ||
+        if (!own_top_level(target) || !IsWindow(source) || !IsWindowVisible(source) ||
+            source == target ||
             GetAncestor(source, GA_ROOT) != source) {
             results.push_back({DesktopStatus::InvalidWindow, 0});
             continue;
