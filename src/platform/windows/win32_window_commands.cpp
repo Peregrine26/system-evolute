@@ -120,15 +120,17 @@ bool Win32WindowCommands::place(std::uintptr_t handle,
     // 有些窗口（提权窗口、部分 UWP/商店应用）会"调用成功但拒绝执行"。
     // 只看返回值会把失败当成成功，所以必须回读一次真实矩形。
     RECT actual{};
-    if (GetWindowRect(hwnd, &actual) != FALSE) {
-        const int dx = std::abs(static_cast<int>(actual.left) - left) +
-                       std::abs(static_cast<int>(actual.top) - top);
-        const int dw = std::abs(static_cast<int>(actual.right - actual.left) - width) +
-                       std::abs(static_cast<int>(actual.bottom - actual.top) - height);
-        if (dx > 2 || dw > 2) {
-            setError(error, L"窗口拒绝调整到目标位置（可能是提权窗口或不允许改变大小）");
-            return false;
-        }
+    if (GetWindowRect(hwnd, &actual) == FALSE) {
+        setError(error, withSystemMessage(L"无法核对移动后的窗口位置，窗口可能已关闭"));
+        return false;
+    }
+    const int dx = std::abs(static_cast<int>(actual.left) - left) +
+                   std::abs(static_cast<int>(actual.top) - top);
+    const int dw = std::abs(static_cast<int>(actual.right - actual.left) - width) +
+                   std::abs(static_cast<int>(actual.bottom - actual.top) - height);
+    if (dx > 2 || dw > 2) {
+        setError(error, L"窗口拒绝调整到目标位置（可能是提权窗口或不允许改变大小）");
+        return false;
     }
 
     return true;

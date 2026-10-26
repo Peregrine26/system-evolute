@@ -108,6 +108,12 @@ if(CROSSDESK_BUILD_SCANNER)
         add_executable(crossdesk_layout_executor_test tests/layout_executor_test.cpp)
         target_link_libraries(crossdesk_layout_executor_test PRIVATE crossdesk_window_scanner_lib)
         add_test(NAME layout_executor_test COMMAND crossdesk_layout_executor_test)
+        add_executable(crossdesk_win32_commands_test tests/win32_commands_test.cpp
+            src/platform/windows/win32_window_commands.cpp)
+        target_include_directories(crossdesk_win32_commands_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(crossdesk_win32_commands_test PRIVATE user32)
+        add_test(NAME win32_commands_test COMMAND crossdesk_win32_commands_test)
+        set_tests_properties(win32_commands_test PROPERTIES TIMEOUT 15)
 
         add_executable(crossdesk_win32_backend_selftest
             tests/win32_backend_selftest.cpp
