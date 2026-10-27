@@ -6,3 +6,8 @@
 /.qtc_clangd/
 *.user
 CMakeUserPresets.json
+/aqtinstall.log
+/plans/
+__pycache__/
+*.pyc
+/.venv/

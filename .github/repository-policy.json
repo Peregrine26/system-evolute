@@ -1,0 +1,39 @@
+{
+  "$comment": "This file documents settings applied manually; verify the live result through the GitHub API.",
+  "repository": {
+    "delete_branch_on_merge": true
+  },
+  "history_ruleset": {
+    "name": "Preserve published branch history",
+    "target": "branch",
+    "enforcement": "active",
+    "bypass_actors": [],
+    "conditions": {
+      "ref_name": {"include": ["~ALL"], "exclude": []}
+    },
+    "rules": [{"type": "non_fast_forward"}]
+  },
+  "protection": {
+    "enforce_admins": true,
+    "restrictions": null,
+    "required_conversation_resolution": true,
+    "allow_force_pushes": false,
+    "allow_deletions": false
+  },
+  "branches": {
+    "main": {
+      "required_status_checks": ["platform", "qt", "repository"],
+      "required_pull_request_reviews": {
+        "dismiss_stale_reviews": true,
+        "require_code_owner_reviews": false,
+        "required_approving_review_count": 1,
+        "require_last_push_approval": true
+      }
+    },
+    "c": {
+      "required_status_checks": ["platform", "qt"],
+      "required_pull_request_reviews": null
+    }
+  },
+  "strict_status_checks": true
+}

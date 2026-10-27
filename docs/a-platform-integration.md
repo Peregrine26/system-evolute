@@ -56,43 +56,19 @@ DWM 持续更新内容，不需截图；注册成功本身不能证明画面正�
 
 ## 开发机验证命令
 
-本机已安装 Qt 6.8.3（Widgets 基础组件）、MinGW 13.1.0、CMake 4.4.4、Ninja 1.13.2，路径为 `%USERPROFILE%/.codex/tools/crossdesk`。使用 Qt 仓库镜像下载，并保留 aqt 的归档校验；未改写系统 PATH。在项目目录执行：
+构建、依赖、Kit 路径、非桌面/桌面 CTest 和演示启动命令统一见
+[构建与测试](getting-started.md)，不在这里复制第二套命令。
+已有实机记录使用 Windows / Qt 6.8.3 / MinGW 13.1.0 / CMake 4.4.4 /
+Ninja 1.13.2；会话脚本可通过 `CROSSDESK_TOOLCHAIN_ROOT` 指定工具包，
+不写系统 PATH。该环境记录不表示每台机器已安装或验收。
 
-```powershell
-# 配置、编译，并运行 5 项测试（含自有窗口的桌面测试）。
-.\scripts\build.ps1 -DesktopTests
-# 单独加载当前 PowerShell 会话的开发环境后运行演示。
-. .\scripts\dev-env.ps1
-.\build-local\crossdesk_dwm_demo.exe --smoke
-.\build-local\crossdesk_qt_dwm_demo.exe --smoke
-```
+原生实验创建两个每 100 ms 更新内容的来源和一个预览窗口。`--smoke`
+约三秒退出，只检查注册；人工模式观察双预览同时更新、缩放位置、关闭单个来源、
+快捷键切换与退出清理。快捷键被占用会提示，仍可关闭退出。
 
-安装后已修复 Qt `slots` 宏与变量名冲突，以及 MinGW 编译扫描器 `wmain` 所需的 `-municode` 链接参数。Qt 实验增加三秒自动退出的 `--smoke` 参数；来源窗口不阻止关闭主窗口时退出。其他机器的工具链根目录可以用 `CROSSDESK_TOOLCHAIN_ROOT` 环境变量指定。
-
-也可在 Visual Studio 2022 Developer PowerShell 中：
-
-```powershell
-cmake -S . -B build-platform -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=OFF
-cmake --build build-platform --config Debug --parallel
-ctest --test-dir build-platform -C Debug -R "^layout_executor_test$" --output-on-failure
-# 以下必须在交互式 Windows 登录桌面运行，只操作自有测试窗口。
-ctest --test-dir build-platform -C Debug -L interactive-desktop --output-on-failure
-.\build-platform\Debug\crossdesk_dwm_demo.exe --smoke
-.\build-platform\Debug\crossdesk_dwm_demo.exe
-```
-
-原生实验创建两个每 100 ms 更新内容的来源和一个预览窗口。`--smoke` 约三秒后退出，只检查注册；人工模式需观察双预览同时更新、缩放位置、关闭单个来源、快捷键切换和退出清理。快捷键被占用会提示，窗口仍可关闭退出。
-
-安装 Qt 6 Widgets 后，在对应的 MSVC 环境构建（路径换成实际版本）：
-
-```powershell
-cmake -S . -B build-qt -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.x.x/msvc2022_64"
-cmake --build build-qt --config Debug --parallel
-# Qt bin 加入 PATH，或使用 windeployqt 部署。
-.\build-qt\Debug\crossdesk_qt_dwm_demo.exe
-```
-
-Qt 实验用两个自有顶层来源每 100 ms 更新文字，来源分开放置并先处理初次绘制，目标有独立控制区和两个预览区，按钮与全局快捷键共用命令。实验每 500 ms 重建矩形跟随 resize；正式 UI 应改用 resize/扫描/模式事件。`crossdesk` 入口保留 C 的原有 UI 骨架。
+Qt 实验也用两个自有顶层来源，按钮与全局快捷键共用命令；每 500 ms
+重建矩形跟随 resize，正式 UI 应改用 resize/扫描/模式事件。来源窗口不会阻止
+关闭主窗口退出。`crossdesk` 主入口仍是独立的 UI 骨架，不能把实验视为正式接线。
 
 ## 验证状态与待办
 

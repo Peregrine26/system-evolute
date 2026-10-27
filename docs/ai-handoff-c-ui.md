@@ -20,7 +20,7 @@ Win32 / X11 后端（A 负责）
 
 A 是主负责人，负责平台 API、共享接口和最终集成；B 负责平台无关的核心逻辑；C 负责 Qt 界面。B 与 C 的模块范围相对集中，但每人都要能解释并演示自己的成果。
 
-当前本地仓库有最小 Qt 启动程序、Windows 控制台扫描器、`WindowInfo`、查询型 `WindowApiAdapter` 和 Win32 实现。Workspace Manager、窗口控制、Mission Control UI 和 X11 后端尚未实现。已有文档：`README.md`、`docs/getting-started.md`、`docs/project-overview.md`、`docs/team-responsibilities.md`、`docs/windows-window-scanner.md`。现有代码重点看 `src/app/main.cpp` 与 `src/window_info.h`；窗口扫描接口可看 `src/platform/window_api_adapter.h`，但 UI 不应直接依赖平台适配器。
+先按[仓库状态](repository-status.md)核对 `main`、角色分支 `c` 与待评审 PR。C 的卡片总览已在 `c`，主线入口仍是骨架，不要再生成一份重复总览。A 已有控制接口、Qt 快捷键/DWM 桥接和实验；调用方式、坐标及失败语义见 [A 平台交接](a-platform-integration.md)。控件级桥接在独立 PR 评审，不能当作主线现有接口。UI 从服务获取数据/命令，不直接包含 Win32/X11 头文件；先阅读根目录 [agent.md](../agent.md)。
 
 课程开发顺序是：CMake/Qt/Git 骨架 -> Windows 扫描 -> Windows 控制 -> Workspace Manager -> Qt 总览 -> Linux X11 -> 布局/快捷键/配置 -> 兼容性测试。C 可以提前用**模拟 Workspace 和窗口数据**制作 Qt 原型，正式接入 B 的核心服务放在对应阶段。
 
