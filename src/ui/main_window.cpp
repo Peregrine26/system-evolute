@@ -5,10 +5,12 @@
 
 #include <QCoreApplication>
 #include <QEasingCurve>
+#include <QGraphicsBlurEffect>
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QPainter>
 #include <QPropertyAnimation>
 #include <QResizeEvent>
 #include <QShortcut>
@@ -24,6 +26,106 @@ namespace {
 // 但也不能在 1366 的笔记本屏上占掉三分之一，所以按窗口宽度取比例再夹住。
 constexpr int kBarMinWidth = 260;
 constexpr int kBarMaxWidth = 380;
+
+// ---- Task View：右键窗口后全屏展开子窗口，背景模糊，不分左右 ----
+class TaskView : public QWidget {
+public:
+    TaskView(QWidget* host, const QVector<WindowItem>& wins, WindowId selected)
+        : QWidget(host), m_selected(selected) {
+        setAttribute(Qt::WA_DeleteOnClose);
+        setAttribute(Qt::WA_QuitOnClose, false);
+        setGeometry(host->rect());
+        setFocusPolicy(Qt::StrongFocus);
+        // 预渲染一张模糊背景：抓 host 截图，套 QGraphicsBlurEffect 再 grab 出来。
+        QPixmap shot = host->grab();
+        auto* tmp = new QLabel;
+        tmp->setPixmap(shot);
+        tmp->resize(shot.size());
+        auto* blur = new QGraphicsBlurEffect(tmp);
+        blur->setBlurRadius(22);
+        tmp->setGraphicsEffect(blur);
+        m_blurred = tmp->grab();
+        delete tmp;
+        m_wins = wins.mid(0, 4);  // 最多 4 个子窗口
+        show();
+        setFocus();
+        raise();
+    }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.drawPixmap(rect(), m_blurred, m_blurred.rect());
+        p.fillRect(rect(), QColor(15, 17, 21, 90));  // 暗化叠加
+
+        const int n = m_wins.size();
+        if (n == 0) return;
+        const int cw = qBound(180, (width() - 60) / n - 22, 300);
+        const int ch = qBound(120, height() - 140, 190);
+        const int gap = 22;
+        const int total = n * cw + (n - 1) * gap;
+        int x = (width() - total) / 2;
+        const int y = (height() - ch) / 2;
+        for (int i = 0; i < n; ++i) {
+            m_rects[i] = QRect(x, y, cw, ch);
+            drawCard(p, m_rects[i], m_wins[i], m_wins[i].id == m_selected);
+            x += cw + gap;
+        }
+        p.setPen(QColor(0x8a, 0x8f, 0x99));
+        QFont hf = font();
+        hf.setPixelSize(12);
+        p.setFont(hf);
+        p.drawText(QRect(0, height() - 44, width(), 30), Qt::AlignCenter,
+                   QStringLiteral("右键展开子窗口 · 点空白或按 Esc 返回"));
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        if (e->button() != Qt::LeftButton) {
+            QWidget::mousePressEvent(e);
+            return;
+        }
+        close();
+    }
+    void keyPressEvent(QKeyEvent* e) override {
+        if (e->key() == Qt::Key_Escape) {
+            close();
+            return;
+        }
+        QWidget::keyPressEvent(e);
+    }
+private:
+    void drawCard(QPainter& p, const QRect& r, const WindowItem& w, bool sel) {
+        p.setBrush(QColor(0x1b, 0x1e, 0x25));
+        p.setPen(QPen(sel ? QColor(0x0a, 0x84, 0xff) : QColor(255, 255, 255, 20), sel ? 2 : 1));
+        p.drawRoundedRect(r, 10, 10);
+        const QRect screen(r.x(), r.y(), r.width(), r.height() - 34);
+        p.save();
+        p.setClipRect(screen);
+        p.fillRect(screen, QColor(0x15, 0x18, 0x1e));
+        p.fillRect(QRect(screen.x(), screen.y(), screen.width(), 20), QColor(0x2b, 0x30, 0x3a));
+        qreal ly = screen.y() + 32;
+        for (int i = 0; i < 3 && ly + 6 < screen.bottom(); ++i) {
+            p.setBrush(QColor(255, 255, 255, 14));
+            p.setPen(Qt::NoPen);
+            p.drawRoundedRect(QRectF(screen.x() + 14, ly,
+                                     (screen.width() - 28) * (i == 2 ? 0.55 : 0.9), 4), 2, 2);
+            ly += 16;
+        }
+        p.restore();
+        const QRect tb(r.x(), r.y() + r.height() - 34, r.width(), 34);
+        p.fillRect(tb, QColor(0x20, 0x24, 0x2c));
+        p.setPen(QColor(0xd6, 0xda, 0xe1));
+        QFont f = font();
+        f.setPixelSize(12);
+        f.setBold(true);
+        p.setFont(f);
+        p.drawText(tb.adjusted(12, 0, -12, 0), Qt::AlignLeft | Qt::AlignVCenter,
+                   QFontMetrics(f).elidedText(w.title, Qt::ElideRight, tb.width() - 24));
+    }
+    QVector<WindowItem> m_wins;
+    WindowId m_selected = 0;
+    QPixmap m_blurred;
+    QRect m_rects[4];
+};
 
 }  // namespace
 
@@ -100,6 +202,13 @@ void MainWindow::connectService() {
 
     connect(m_cards, &CardStack::windowClicked, this, &MainWindow::onCardClicked);
     connect(m_cards, &CardStack::windowActivated, this, &MainWindow::onCardActivated);
+    connect(m_cards, &CardStack::windowContextMenu, this, [this](WindowId id) {
+        if (id != 0) {
+            m_selected = id;
+            m_cards->setSelected(id);
+        }
+        openTaskView();
+    });
 }
 
 void MainWindow::setAllowHide(bool allow) {
@@ -192,6 +301,11 @@ void MainWindow::onRefresh() {
     if (!m_statusTakenByRefresh) {
         setStatus(QStringLiteral("已刷新，共 %1 个窗口。").arg(m_windows.size()));
     }
+}
+
+void MainWindow::openTaskView() {
+    // 右键展开 Task View：全屏、模糊背景、最多 4 个子窗口铺开。
+    new TaskView(this, m_windows, m_selected);
 }
 
 void MainWindow::collapse() {
