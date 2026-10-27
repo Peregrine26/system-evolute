@@ -51,39 +51,28 @@ bool Win32WindowCommands::activate(std::uintptr_t handle, std::wstring* error) {
         return false;
     }
 
-    if (IsIconic(hwnd)) {
-        ShowWindow(hwnd, SW_RESTORE);
-    } else {
-        ShowWindow(hwnd, SW_SHOW);
-    }
-
-    if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) {
-        return true;
-    }
-
-    // 前台锁定（foreground lock）：Windows 只允许"当前在前台的进程"把前台权交出去。
-    // 我们的窗口此刻在前台，本来有资格；但如果中间被别的进程抢过焦点就会失败。
-    // 兜底做法是临时把自己的输入队列挂到目标线程上，借用它的前台权限。
-    const HWND foreground = GetForegroundWindow();
-    const DWORD foregroundThread =
-        foreground != nullptr ? GetWindowThreadProcessId(foreground, nullptr) : 0;
-    const DWORD targetThread = GetWindowThreadProcessId(hwnd, nullptr);
-
-    bool attached = false;
-    if (foregroundThread != 0 && targetThread != 0 && foregroundThread != targetThread) {
-        attached = AttachThreadInput(foregroundThread, targetThread, TRUE) != FALSE;
-    }
-    BringWindowToTop(hwnd);
+    // Never join a foreign input queue: a stalled target must not stall us.
+    // This bounded observation runs on a worker, never on the Qt event loop.
+    ShowWindowAsync(hwnd, IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
     SetForegroundWindow(hwnd);
-    if (attached) {
-        AttachThreadInput(foregroundThread, targetThread, FALSE);
-    }
-
-    if (GetForegroundWindow() == hwnd) {
-        return true;
-    }
-
-    setError(error, L"Windows 拒绝了置前请求（目标窗口可能属于管理员权限的进程）");
+    bool retriedAfterRestore = false;
+    const ULONGLONG start = GetTickCount64();
+    do {
+        if (!IsWindow(hwnd)) {
+            setError(error, L"窗口已在定位期间关闭");
+            return false;
+        }
+        if (GetForegroundWindow() == hwnd && IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+            return true;
+        }
+        if (!retriedAfterRestore && IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+            // Restore is asynchronous; the initial request can precede it.
+            SetForegroundWindow(hwnd);
+            retriedAfterRestore = true;
+        }
+        Sleep(10);
+    } while (GetTickCount64() - start < 1500);
+    setError(error, L"未能确认置前完成（请求可能稍后执行，请核对后重试）");
     return false;
 }
 
@@ -106,34 +95,37 @@ bool Win32WindowCommands::place(std::uintptr_t handle,
     // 最小化状态下 SetWindowPos 改的是"还原后"的位置，但窗口仍然是最小化的，
     // 用户看不到效果。先还原再摆位。
     if (IsIconic(hwnd)) {
-        ShowWindow(hwnd, SW_RESTORE);
+        ShowWindowAsync(hwnd, SW_RESTORE);
     }
 
     SetLastError(0);
     const BOOL moved = SetWindowPos(hwnd, nullptr, left, top, width, height,
-                                    SWP_NOZORDER | SWP_NOACTIVATE);
+                                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
     if (moved == FALSE) {
         setError(error, withSystemMessage(L"调整窗口位置失败"));
         return false;
     }
 
-    // 有些窗口（提权窗口、部分 UWP/商店应用）会"调用成功但拒绝执行"。
-    // 只看返回值会把失败当成成功，所以必须回读一次真实矩形。
-    RECT actual{};
-    if (GetWindowRect(hwnd, &actual) == FALSE) {
-        setError(error, withSystemMessage(L"无法核对移动后的窗口位置，窗口可能已关闭"));
-        return false;
-    }
-    const int dx = std::abs(static_cast<int>(actual.left) - left) +
-                   std::abs(static_cast<int>(actual.top) - top);
-    const int dw = std::abs(static_cast<int>(actual.right - actual.left) - width) +
-                   std::abs(static_cast<int>(actual.bottom - actual.top) - height);
-    if (dx > 2 || dw > 2) {
-        setError(error, L"窗口拒绝调整到目标位置（可能是提权窗口或不允许改变大小）");
-        return false;
-    }
-
-    return true;
+    // An accepted asynchronous request is not success. Observe actual bounds
+    // for a bounded time, including closure and restore failures.
+    const ULONGLONG start = GetTickCount64();
+    do {
+        RECT actual{};
+        if (!IsWindow(hwnd) || GetWindowRect(hwnd, &actual) == FALSE) {
+            setError(error, L"无法核对移动后的窗口位置，窗口可能已关闭");
+            return false;
+        }
+        const auto distance = [](long a, long long b) { return std::llabs(a - b); };
+        if (!IsIconic(hwnd) &&
+            distance(actual.left, left) <= 2 && distance(actual.top, top) <= 2 &&
+            distance(actual.right - actual.left, width) <= 2 &&
+            distance(actual.bottom - actual.top, height) <= 2) {
+            return true;
+        }
+        Sleep(10);
+    } while (GetTickCount64() - start < 1500);
+    setError(error, L"未能确认排列完成（目标可能拒绝调整，请求也可能稍后执行，请核对后重试）");
+    return false;
 }
 
 }  // namespace crossdesk

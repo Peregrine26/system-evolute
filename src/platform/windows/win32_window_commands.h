@@ -5,16 +5,11 @@
 
 namespace crossdesk {
 
-// 平台命令层：置前与设置位置的最小实现。
-//
-// 为什么单独一个文件、而不是写进界面代码：
-// 界面层（src/ui）不许出现 windows.h，也不许出现 HWND——这是三人分工的边界。
-// 但 A 的 Win32ApiAdapter 目前只有查询接口（枚举/标题/进程/矩形），没有命令，
-// 于是"点一下真的切过去"这件事没人做。这里先给一份兜底实现，位置放在
-// src/platform/windows/ 下，属于 A 的地盘。
-//
-// A 把他的命令接口写好后：删掉这两个文件，把 LiveService 里的两处调用换成
-// 适配器的命令，界面代码一行都不用动。
+// C prototype command facade. A's adapter also exposes request/status commands;
+// this facade adds bounded observation for the current bool-based UI service.
+// Calls may observe for up to 1.5 s and MUST run off the GUI/target owner thread.
+// LiveService runs them on a worker. No input queues are attached. A timeout
+// means unconfirmed, not canceled: a busy target may execute the request later.
 class Win32WindowCommands {
 public:
     // 把窗口切到前台。最小化的先还原。

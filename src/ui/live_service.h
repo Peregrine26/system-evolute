@@ -2,9 +2,8 @@
 
 // 真实窗口数据源：用 A 的扫描器读当前桌面的顶层窗口，用平台命令层执行置前/设位置。
 //
-// 查询走 A 的 WindowsWindowScanner（已有）；命令走 Win32WindowCommands
-// （src/platform/windows/win32_window_commands.*，属于 A 的地盘，当前是兜底实现）。
-// 命令一律通过 operationFinished 逐窗回报成功/失败，界面不假设命令一定成功。
+// 查询走 A 的 WindowsWindowScanner；命令在工作线程发出并限时观察真实结果。
+// operationFinished 异步回报；未确认或被拒绝都不声称成功。
 
 #include "crossdesk_service.h"
 
@@ -14,7 +13,6 @@
 namespace crossdesk {
 class WindowApiAdapter;
 class WindowsWindowScanner;
-class Win32WindowCommands;
 }  // namespace crossdesk
 
 namespace crossdesk::ui {
@@ -41,7 +39,10 @@ private:
 
     std::unique_ptr<crossdesk::WindowApiAdapter> m_api;
     std::unique_ptr<crossdesk::WindowsWindowScanner> m_scanner;
-    std::unique_ptr<crossdesk::Win32WindowCommands> m_commands;
+    // Only one outstanding command; worker results return through a watcher
+    // owned by this service, so destruction never leaves a callback to it.
+    bool m_commandPending = false;
+    void runCommand(WindowId window, const QRect& target, bool activate);
 };
 
 }  // namespace crossdesk::ui

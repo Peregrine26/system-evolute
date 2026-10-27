@@ -7,6 +7,8 @@
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <cstdint>
@@ -34,7 +36,6 @@ LiveService::LiveService(std::unique_ptr<crossdesk::WindowApiAdapter> api, QObje
     : CrossDeskService(parent), m_api(std::move(api)) {
     if (!m_api) m_api = std::make_unique<crossdesk::Win32ApiAdapter>();
     m_scanner = std::make_unique<crossdesk::WindowsWindowScanner>(*m_api);
-    m_commands = std::make_unique<crossdesk::Win32WindowCommands>();
     m_selfPid = static_cast<std::uint32_t>(QCoreApplication::applicationPid());
 
     // 屏幕可用区域先用 Qt 的查询顶替，等 A 提供与窗口位置同坐标系的接口后替换。
@@ -116,29 +117,40 @@ void LiveService::refresh() {
 }
 
 void LiveService::activateWindow(WindowId window) {
-    std::wstring error;
-    const bool ok = m_commands->activate(static_cast<std::uintptr_t>(window), &error);
-
-    if (ok) {
-        // 成功时不要返回"已置前"这种断言太强的话：我们只确认了前台窗口变成了它。
-        emit operationFinished({window, true, QStringLiteral("已切换到目标窗口。")});
-        return;
-    }
-    emit operationFinished({window, false,
-                            QStringLiteral("定位失败：%1").arg(fromWide(error))});
+    runCommand(window, {}, true);
 }
 
 void LiveService::placeWindow(WindowId window, const QRect& target) {
-    std::wstring error;
-    const bool ok = m_commands->place(static_cast<std::uintptr_t>(window), target.x(),
-                                      target.y(), target.width(), target.height(), &error);
+    runCommand(window, target, false);
+}
 
-    if (ok) {
-        emit operationFinished({window, true, QStringLiteral("已排列。")});
+void LiveService::runCommand(WindowId window, const QRect& target, bool activate) {
+    if (m_commandPending) {
+        emit operationFinished({window, false, QStringLiteral("上一项窗口操作仍在核对，请稍后重试。")});
         return;
     }
-    emit operationFinished({window, false,
-                            QStringLiteral("排列失败：%1").arg(fromWide(error))});
+    m_commandPending = true;
+    auto* watcher = new QFutureWatcher<OperationResult>(this);
+    connect(watcher, &QFutureWatcher<OperationResult>::finished, this, [this, watcher] {
+        const auto result = watcher->result();
+        m_commandPending = false;
+        watcher->deleteLater();
+        emit operationFinished(result);
+    });
+    // Capture values only. A deleted service neither waits for a foreign window
+    // nor receives the worker's completion; its child watcher disconnects it.
+    watcher->setFuture(QtConcurrent::run([window, target, activate] {
+        crossdesk::Win32WindowCommands commands;
+        std::wstring error;
+        const bool ok = activate
+            ? commands.activate(static_cast<std::uintptr_t>(window), &error)
+            : commands.place(static_cast<std::uintptr_t>(window), target.x(), target.y(),
+                             target.width(), target.height(), &error);
+        return OperationResult{window, ok, ok
+            ? (activate ? QStringLiteral("已切换到目标窗口。") : QStringLiteral("已排列。"))
+            : QStringLiteral("%1失败：%2").arg(activate ? QStringLiteral("定位")
+                                                        : QStringLiteral("排列"), fromWide(error))};
+    }));
 }
 
 }  // namespace crossdesk::ui

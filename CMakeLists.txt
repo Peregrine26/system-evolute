@@ -158,9 +158,9 @@ if(WIN32 AND CROSSDESK_BUILD_GUI AND CROSSDESK_BUILD_SCANNER)
 endif()
 
 # 真实窗口数据源：把 A 的扫描器接到界面上，显示真实窗口。
-# 查询走 A 的扫描器；命令（置前 / 设位置）走 win32_window_commands，
-# 那是 A 的地盘上的兜底实现，A 接好适配器后删掉即可。
+# 查询走 A 的扫描器；命令通过平台 facade 在工作线程发出并限时观察。
 if(CROSSDESK_BUILD_GUI AND WIN32 AND CROSSDESK_BUILD_SCANNER)
+    find_package(Qt6 6.2 REQUIRED COMPONENTS Concurrent)
     target_sources(crossdesk_ui PRIVATE
         src/ui/live_service.cpp
         src/ui/live_service.h
@@ -170,6 +170,7 @@ if(CROSSDESK_BUILD_GUI AND WIN32 AND CROSSDESK_BUILD_SCANNER)
     target_link_libraries(crossdesk_ui PUBLIC
         crossdesk_window_scanner_lib
         crossdesk_win32_backend
+        Qt6::Concurrent
     )
     # PUBLIC：main.cpp 也要看见这个宏才知道 --live 是否可用
     target_compile_definitions(crossdesk_ui PUBLIC CROSSDESK_HAS_LIVE_SCANNER=1)
@@ -191,6 +192,10 @@ if(CROSSDESK_BUILD_GUI AND WIN32 AND CROSSDESK_BUILD_SCANNER)
         target_link_libraries(crossdesk_live_service_test PRIVATE crossdesk_ui)
         add_test(NAME live_service_test COMMAND crossdesk_live_service_test)
         set_tests_properties(live_service_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
+        add_executable(crossdesk_live_service_commands_test tests/live_service_commands_test.cpp)
+        target_link_libraries(crossdesk_live_service_commands_test PRIVATE crossdesk_ui user32)
+        add_test(NAME live_service_commands_test COMMAND crossdesk_live_service_commands_test)
+        set_tests_properties(live_service_commands_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
         add_executable(crossdesk_ui_dwm_selftest tests/ui_dwm_selftest.cpp)
         target_link_libraries(crossdesk_ui_dwm_selftest PRIVATE crossdesk_ui crossdesk_qt_platform)
         add_test(NAME ui_dwm_selftest COMMAND crossdesk_ui_dwm_selftest)
