@@ -123,6 +123,8 @@ private:
 
     // 外露的那条影子：鼠标压上去就把第一张提起来。
     bool onShadowEdge(const QPoint& pos) const;
+    // 命中哪张卡的哪层影子（每层影子本身是个窗口，碰到就上提）。
+    bool shadowLayerAt(const QPoint& pos, int& card, int& layer) const;
     void updateHover(const QPoint& pos);
     void setLiftTarget(bool on);
     void applyLift();
@@ -142,6 +144,8 @@ private:
     // 每张卡的落位（relayout 时记下）：悬停上提时从落位往上抬，影子按落位画不动。
     QVector<QRect> m_restGeo;
     int m_hoveredCard = -1;  // 当前悬停的卡（-1 = 无）
+    int m_hoveredShadowCard = -1;  // 当前悬停的影子层所在卡（-1 = 无）
+    int m_hoveredShadowLayer = 0;  // 悬停的是第几层影子（1..kShadowLayers）
 
     // 提起程度 0..1，配一段 140ms 的补间：0 = 落位，1 = 抬起 kLiftHeight。
     qreal m_lift = 0.0;

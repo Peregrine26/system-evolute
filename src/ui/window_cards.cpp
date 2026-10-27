@@ -316,9 +316,14 @@ void CardStack::paintEvent(QPaintEvent*) {
             // 第一张被提起来时整体提亮一点：离桌面远了，影子该淡一些。
             const int liftTone = (c == m_hoveredCard) ? qRound(m_lift * 6) : 0;
             for (int i = m_shadowLayers; i >= 1; --i) {
-                const int offset = i * kShadowStep;
+                int xoff = i * kShadowStep;
+                int yoff = i * kShadowStep;
+                // 命中的那层影子本身是个窗口，碰到就往上提 8px（不浮到前面、不盖前面卡片）。
+                if (c == m_hoveredShadowCard && i == m_hoveredShadowLayer) {
+                    yoff -= 8;
+                }
                 QPainterPath layer;
-                layer.addRoundedRect(QRectF(base).translated(offset, offset), kCardRadius,
+                layer.addRoundedRect(QRectF(base).translated(xoff, yoff), kCardRadius,
                                      kCardRadius);
                 const int tone = 0x21 + (m_shadowLayers - i) * 7 + liftTone;
                 painter.fillPath(layer, QColor(tone, tone + 5, tone + 11));
@@ -554,17 +559,58 @@ bool CardStack::onShadowEdge(const QPoint& pos) const {
     return band.contains(pos);
 }
 
+// 命中哪张卡的哪层影子：影子从卡片右下错开露出，每层露出一圈。
+// 右侧条/下侧条各按露出量算出第几层（1..kShadowLayers）。
+bool CardStack::shadowLayerAt(const QPoint& pos, int& cardOut, int& layerOut) const {
+    if (m_shadowLayers <= 0 || m_stacked) {
+        return false;
+    }
+    for (int c = 0; c < m_cards.size(); ++c) {
+        const QRect base = m_restGeo.value(c, m_cards.at(c)->geometry());
+        if (base.isNull() || base.width() <= 0 || base.height() <= 0) {
+            continue;
+        }
+        const int dx = pos.x() - base.right();   // 右侧露出量
+        const int dy = pos.y() - base.bottom();  // 下侧露出量
+        // 必须落在右侧条或下侧条（不超出另一维太多），且在影子总跨度内。
+        const bool rightStrip = dx > 0 && dx <= kShadowSpan &&
+                                pos.y() >= base.top() && pos.y() <= base.bottom() + kShadowSpan;
+        const bool bottomStrip = dy > 0 && dy <= kShadowSpan &&
+                                 pos.x() >= base.left() && pos.x() <= base.right() + kShadowSpan;
+        if (!rightStrip && !bottomStrip) {
+            continue;
+        }
+        const int mx = qMax(dx, dy);
+        int layer = (mx + kShadowStep - 1) / kShadowStep;  // 向上取整 = 第几层
+        if (layer < 1) layer = 1;
+        if (layer > m_shadowLayers) layer = m_shadowLayers;
+        cardOut = c;
+        layerOut = layer;
+        return true;
+    }
+    return false;
+}
+
 void CardStack::updateHover(const QPoint& pos) {
     if (m_dragging) {
         return;
     }
-    // 悬停哪张卡就提哪张（任意一张，不只第一张）。
-    const int h = cardIndexAt(pos);
-    if (h == m_hoveredCard) {
-        return;
+    // 先看是不是落在某层影子上（影子本身是窗口，碰到就上提，不算卡片悬停）。
+    int scard = -1, slayer = 0;
+    const bool onShadow = shadowLayerAt(pos, scard, slayer);
+    const int newShadowCard = onShadow ? scard : -1;
+    const int newShadowLayer = onShadow ? slayer : 0;
+    if (newShadowCard != m_hoveredShadowCard || newShadowLayer != m_hoveredShadowLayer) {
+        m_hoveredShadowCard = newShadowCard;
+        m_hoveredShadowLayer = newShadowLayer;
+        update();  // 影子提起要重画
     }
-    m_hoveredCard = h;
-    setLiftTarget(h >= 0);
+    // 卡片悬停（影子区域不算卡片）
+    const int h = onShadow ? -1 : cardIndexAt(pos);
+    if (h != m_hoveredCard) {
+        m_hoveredCard = h;
+        setLiftTarget(h >= 0);
+    }
 }
 
 void CardStack::setLiftTarget(bool on) {
@@ -607,6 +653,8 @@ void CardStack::clearLift() {
     }
     m_lift = 0.0;
     m_hoveredCard = -1;
+    m_hoveredShadowCard = -1;
+    m_hoveredShadowLayer = 0;
     // 落回各自落位，别让谁悬在半空。
     for (int i = 0; i < m_cards.size() && i < m_restGeo.size(); ++i) {
         if (m_cards.at(i)->geometry() != m_restGeo.at(i)) {
@@ -671,9 +719,14 @@ void CardStack::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void CardStack::leaveEvent(QEvent* event) {
-    // 鼠标离开整条栏：提起来的那张落回去，不然它会一直悬在半空。
+    // 鼠标离开整条栏：提起来的那张/那层影子都落回去。
     if (!m_dragging) {
         setLiftTarget(false);
+        if (m_hoveredShadowCard >= 0) {
+            m_hoveredShadowCard = -1;
+            m_hoveredShadowLayer = 0;
+            update();
+        }
     }
     QWidget::leaveEvent(event);
 }
