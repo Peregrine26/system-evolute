@@ -1,6 +1,6 @@
 # CrossDesk Agent 协作与 PR 规范
 
-本文件从 AgentOSNext 的 PR、Git、文档、测试与多会话协作纪律中提取通用规则，并按 CrossDesk 的 GitHub、C++17、Qt 和 CMake 环境调整。产品范围与模块职责以本项目文档为准。
+本文件从 AgentOSNext 的 PR、Git、文档、测试与多会话协作纪律中提取通用规则，并按 CrossDesk 的 GitHub、C++17、Qt 和 CMake 环境调整。产品范围与模块职责以本项目文档为准。根目录 `AGENTS.md` 只提供本文件的入口，不复制规则。
 
 ## 开始工作前
 
@@ -14,6 +14,8 @@
 | 项目入口与构建概览 | [README.md](README.md) |
 | 产品范围、需求、阶段与待确认决定 | [项目总览](docs/project-overview.md) |
 | A/B/C 职责、接口交接与验收 | [三人分工](docs/team-responsibilities.md) |
+| 已合入、分支原型和验证证据 | [仓库状态](docs/repository-status.md) |
+| 分支流向、保护和仓库检查 | [仓库维护](docs/repository-maintenance.md) |
 | 构建依赖、命令与手工测试 | [构建与启动](docs/getting-started.md) |
 | Windows 扫描器原理与限制 | [扫描器说明](docs/windows-window-scanner.md) |
 | B：核心逻辑交接 | [B 交接说明](docs/ai-handoff-b-core.md) |
@@ -35,7 +37,7 @@
 
 - 每个大任务使用独立分支和 worktree，例如：`git worktree add -b feat/workspace-manager ../crossdesk-workspace-manager main`。先确认本地基线与远端状态，再选择起点。
 - 分支使用 `<conventional-type>/<小写-kebab-主题>`；类型为 `build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test`。新分支不使用人名、`claude/*` 或 `codex/*`；已有分支不因本规范自动重命名。
-- 集成目标当前为 `main`；通过 PR 合入，不直接 push 主分支，不改写公共分支历史。若团队以后引入 `dev` 或发布分支，先记录流向与保护规则，再执行。
+- 集成目标为 `main`；C 已采用 `主题分支 → c → main` 的角色分支流向。两级均通过 PR、评审和 CI，不直接 push 集成分支，不改写公共历史。具体流向与保护见[仓库维护](docs/repository-maintenance.md)；新增其他角色/发布分支前先记录流向与保护规则。
 - 未准备提交评审的工作保留本地。推送主题分支时同时创建对应 PR；未就绪时使用 GitHub Draft，并给标题加 `WIP: `，完成后再转为可评审。
 - 提交遵循 Conventional Commits，例如 `fix: handle closed windows during refresh`。Agent 参与的提交在正文注明来源，例如 `Agent: Codex`。
 - 禁止 `git add -A`；按明确路径暂存，提交前用 `git status --short` 和 `git diff --cached` 核对每个文件的来源和内容。
@@ -70,10 +72,10 @@
 
 ## 验证与 CI
 
-- 所有变更运行 `git diff --check`；文档变更同时核对本地链接、命令与实际构建目标。本仓库当前没有 `make docs-lint`，不要照搬不存在的 AgentOS 命令。
+- 所有变更运行 `git diff --check` 和 `python scripts/check_repository.py`；后者检查已跟踪文件的本地 Markdown 链接/标题、UTF-8、生成物和原生 API 边界。新文件先明确暂存，避免未提交文件掩盖断链。文档命令和远程来源仍需人工核对。本仓库没有 `make docs-lint`。
 - 纯文档改动默认做轻量检查；代码改动按影响运行定向编译、单元测试和静态检查。保留真实退出码，不通过截断输出或管道掩盖失败。
 - 新增或改变行为的自动测试必须进入云端检查范围；现有 workflow 能执行时直接复用，不能执行时在同一 PR 补充相应自动化。不得跳过测试、缩小范围或降低断言来制造通过。
-- 当前 Windows CI 关闭 Qt 构建，执行平台编译和 `layout_executor_test`；它不证明 Qt UI、交互桌面自测或 Linux X11 已通过。覆盖范围以 workflow 和测试代码为准。
+- Windows CI 分为无 Qt 平台构建和 Qt 6.8.3 / MSVC 2022 完整构建，均运行全部非 `interactive-desktop` 测试且不允许空测试集；仓库检查由独立 Python 作业运行。交互桌面测试只在云端编译，Linux X11 未纳入当前矩阵。覆盖范围以 workflow 和测试代码为准。
 - 完整构建矩阵、跨平台回归等重复重检查优先交给 CI；只有复现明确失败、调试本地问题或用户要求时才本地运行对应重检查，先说明预计耗时和环境影响。
 - 窗口操作与交互桌面自测会移动、隐藏或改变焦点，必须使用受控普通测试窗口和适合的桌面环境；不为纯文档任务启动这些测试。
 - 缺少交互桌面、Qt Kit 或目标平台时如实记录限制。必要的桌面验收由审阅者或对应平台负责人复现，不能以模拟测试或无桌面的 CI 结果替代。
@@ -85,7 +87,7 @@
 ```powershell
 cmake -S . -B build-platform -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=OFF
 cmake --build build-platform --config Debug --parallel
-ctest --test-dir build-platform -C Debug -R "^layout_executor_test$" --output-on-failure
+ctest --test-dir build-platform -C Debug -LE interactive-desktop --output-on-failure --no-tests=error
 ```
 
 Qt 与 Linux 构建方式见 [构建与启动](docs/getting-started.md)。`interactive-desktop` 标签的测试与真实用户旅程需要单独的桌面验收记录。

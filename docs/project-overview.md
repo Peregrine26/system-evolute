@@ -88,7 +88,7 @@ Win32 Backend   X11 Backend
 - **平台适配器** 把 Win32/X11 的窗口标识、查询结果和错误转换为上层可理解的数据。
 - **窗口标识不是永久 ID**：窗口关闭后可失效，配置保存需要另行设计“重新识别窗口”的策略。
 
-当前仓库已有 `WindowInfo`、`WindowApiAdapter`、`Win32ApiAdapter` 和 Windows 扫描器。接口目前只支持查询；窗口控制、错误表达和 X11 实现要在后续阶段通过小实例逐步加入。已有扫描器的名字带有 `Windows`，将来引入通用扫描流程时再调整，不应把这个名字视为最终跨平台接口。
+共享接口已经包含查询、显示/隐藏、置前、摆位和操作结果；主线还有逐窗请求/观察分离的布局执行器。接口前提、失败语义和实验见 [A 平台交接](a-platform-integration.md)。X11 后端尚未实现。已有扫描器的名字带有 `Windows`，将来引入通用扫描流程时再调整，不应把这个名字视为最终跨平台接口。
 
 ## 7. 三人分工与协作接口
 
@@ -136,4 +136,4 @@ Win32 Backend   X11 Backend
 
 ## 11. 当前进度
 
-仓库目前有最小 Qt 启动程序、Windows 控制台扫描器和初始的平台适配器接口。Mission Control UI、Workspace Manager、Linux X11、窗口控制、布局、快捷键、配置保存均未实现。构建方式见 [构建与启动](getting-started.md)，扫描器原理见 [Windows Window Scanner](windows-window-scanner.md)。本总览是团队协作与需求基线，完成一项功能后应同步更新其状态和验收结果。
+实现和验收证据统一维护在[仓库状态](repository-status.md)，区分 `main`、角色分支和待评审 PR。本总览持有产品目标；某个底层能力或实验已存在，不表示整条用户流程已经完成。构建方式见[构建与启动](getting-started.md)，扫描器原理见 [Windows Window Scanner](windows-window-scanner.md)。
