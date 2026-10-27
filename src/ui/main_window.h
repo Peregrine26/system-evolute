@@ -51,6 +51,7 @@ private:
     void onCardActivated(WindowId id);  // 双击 = 把真实窗口切到前台
     void onRefresh();
     void onActivate();
+    void openTaskView();  // 右键窗口：全屏展开子窗口（背景模糊）
 
     void showSelected(bool animate = true);
     void setStatus(const QString& text, bool error = false);

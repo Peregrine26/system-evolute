@@ -102,6 +102,7 @@ public:
 signals:
     void windowClicked(WindowId id);
     void windowActivated(WindowId id);  // 双击：把真实窗口切到前台
+    void windowContextMenu(WindowId id);  // 右键：展开 Task View
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -110,6 +111,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;  // 右键展开 Task View
     void leaveEvent(QEvent* event) override;
 
 private:

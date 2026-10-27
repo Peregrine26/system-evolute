@@ -3,6 +3,7 @@
 #include <QEasingCurve>
 #include <QApplication>
 #include <QStyleHints>
+#include <QContextMenuEvent>
 #include <QFontMetrics>
 #include <QLinearGradient>
 #include <QMouseEvent>
@@ -364,6 +365,15 @@ void CardStack::mouseDoubleClickEvent(QMouseEvent* event) {
 
 int CardStack::shadowSpan() const {
     return m_shadowLayers > 0 ? kShadowSpan : 0;
+}
+
+// 右键窗口：发信号给主窗口，展开 Task View。
+void CardStack::contextMenuEvent(QContextMenuEvent* event) {
+    const int index = cardIndexAt(event->pos());
+    if (index >= 0 && index < m_cards.size()) {
+        emit windowContextMenu(m_cards.at(index)->windowId());
+    }
+    event->accept();
 }
 
 // 把第 index 张放到 target：动画版和直给版只差这一处，抽出来省得写三遍。
