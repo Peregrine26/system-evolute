@@ -17,6 +17,6 @@
 - [ ] 文档、正文与最终 diff 一致，已运行 `git diff --check` 和仓库检查。
 - [ ] 新增行为的测试进入 CI；交互测试仅使用受控自有窗口。
 - [ ] 已读取全部评论及正式评审；批准与验证绑定当前 head。
-- [ ] 合并前由其他组员 Approve；共享接口/行为变更由另外两位受影响组员审阅。
+- [ ] 若目标为 `main`，合并前由其他组员 Approve；共享接口/行为变更由另外两位受影响组员审阅。目标为 `c` 时人工 Approve 不作强制门槛。
 
 协作、分支及评审的完整要求见 [agent.md](https://github.com/Peregrine26/system-evolute/blob/main/agent.md)。

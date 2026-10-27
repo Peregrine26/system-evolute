@@ -37,7 +37,7 @@
 
 - 每个大任务使用独立分支和 worktree，例如：`git worktree add -b feat/workspace-manager ../crossdesk-workspace-manager main`。先确认本地基线与远端状态，再选择起点。
 - 分支使用 `<conventional-type>/<小写-kebab-主题>`；类型为 `build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test`。新分支不使用人名、`claude/*` 或 `codex/*`；已有分支不因本规范自动重命名。
-- 集成目标为 `main`；C 已采用 `主题分支 → c → main` 的角色分支流向。两级均通过 PR、评审和 CI，不直接 push 集成分支，不改写公共历史。具体流向与保护见[仓库维护](docs/repository-maintenance.md)；新增其他角色/发布分支前先记录流向与保护规则。
+- 集成目标为 `main`；C 已采用 `主题分支 → c → main` 的角色分支流向。两级均通过 PR 和 CI，不直接 push 集成分支，不改写公共历史；合入 `c` 不强制人工 Approve，进入 `main` 时完成组员评审。具体流向与保护见[仓库维护](docs/repository-maintenance.md)；新增其他角色/发布分支前先记录流向与保护规则。
 - 未准备提交评审的工作保留本地。推送主题分支时同时创建对应 PR；未就绪时使用 GitHub Draft，并给标题加 `WIP: `，完成后再转为可评审。
 - 提交遵循 Conventional Commits，例如 `fix: handle closed windows during refresh`。Agent 参与的提交在正文注明来源，例如 `Agent: Codex`。
 - 禁止 `git add -A`；按明确路径暂存，提交前用 `git status --short` 和 `git diff --cached` 核对每个文件的来源和内容。
@@ -49,11 +49,11 @@
 - 本仓库位于 GitHub，使用 GitHub PR 页面、GitHub API 或已认证的 `gh`；AgentOS 的 Forgejo 地址与 `tea` 命令不适用。
 - 每个 PR 聚焦一个可审阅结果。标题描述最终改动；正文说明具体问题、改动后的行为、关联需求或 issue、验证结果、未验证项和集成影响。
 - 正文至少让审阅者知道：如何构建和复现、正常与失败路径如何验证、共享接口的调用方式是否改变、是否影响另一平台或其他模块。
-- 合并前至少获得一名其他组员的 Approve，并完成本项目要求的复现检查。共享接口或行为变化须先提供调用示例与失败场景，并由另外两位受影响组员审阅，遵守现有分工约定。
+- 合入 `main` 前至少获得一名其他组员的 Approve，并完成本项目要求的复现检查。合入 `c` 的 PR 不以人工 Approve 为强制条件，但仍须通过 CI、解决评审对话，并在进入 `main` 前补齐评审。共享接口或行为变化须先提供调用示例与失败场景，并在进入 `main` 前由另外两位受影响组员审阅，遵守现有分工约定。
 - Review 的具体问题写在 PR 对应代码行；Approve 或 Request Changes 通过 GitHub 正式评审提交。作者不能代替其他组员批准自己的变更。
 - 在评审、修改、回复、rebase 或合并 PR 前，读取全部最新评论、逐行意见、Approve、Request Changes 和机器人结果；不要只读正文或只看 CI 颜色。
 - 评审结论绑定其检查的 commit。更新 head 后，明确新增改动并确认相关意见已处理；旧 head 的批准或证据不能自动证明新 head 通过。
-- 至少一人 Approve 是团队流程要求，不表示远端保护已配置。以 GitHub 实际分支保护执行更严格的合并限制；发现策略漂移时报告，不擅自修改保护或绕过检查。
+- `main` 至少一人 Approve 是团队流程要求，不表示远端保护已配置；`c` 明确不设置强制批准。以 GitHub 实际分支保护执行已记录的合并限制；发现策略漂移时报告，不擅自绕过检查。
 - 缺陷使用 GitHub issue 跟踪，记录复现步骤、期望与实际行为、平台和版本。分层修复或待复验 PR 用 `Refs #N`；只有全部修复合入且最终复验通过的 PR 才用 `Fixes #N` 自动关闭。
 - 合并前确认正文、文档和测试说明反映最终 diff；合并后对账主分支结果，不能只留下聊天中的完成声明。
 
