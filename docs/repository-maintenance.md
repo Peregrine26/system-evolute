@@ -28,9 +28,9 @@ GitHub 对 `main` 要求：最新分支基线、至少一次其他人的评审�
 本轮新增的 `repository`。`c` 尚未包含仓库检查 workflow，暂不要求一个不会
 运行的检查；后续同步该 workflow 时，再将其加入 `c` 的必需检查。
 
-全部已发布分支还受 `Preserve published branch history` ruleset 约束：
+全部已推送分支还受 `Preserve published branch history` ruleset 约束：
 禁止 non-fast-forward 更新，无绕过名单；普通主题分支仍可正常追加提交。
-已公开分支需要同步时使用 merge；不要为整理提交改写公共历史。
+已推送分支需要同步时使用 merge；不要为整理提交改写其历史。
 
 仓库开启合并后自动删除主题分支；受保护的 `c` 角色分支保留。旧分支只有在
 tip 已可从合并目标到达、没有开放 PR，且没有未交接工作区改动时才删除。

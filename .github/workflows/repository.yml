@@ -2,6 +2,7 @@ name: Repository checks
 
 on:
   push:
+    branches: [main, c]
   pull_request:
 
 permissions:

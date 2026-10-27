@@ -9,6 +9,17 @@ import sys
 from urllib.parse import unquote, urlsplit
 
 
+NEUTRAL_FILES = frozenset({
+    "src/window_info.h",
+    "src/windows_window_scanner.h",
+    "src/windows_window_scanner.cpp",
+    "src/platform/window_api_adapter.h",
+    "src/platform/layout_executor.h",
+    "src/platform/layout_executor.cpp",
+})
+NEUTRAL_PREFIXES = ("src/core/", "src/ui/")
+
+
 def git(root: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(root), *args], encoding="utf-8")
 
@@ -34,7 +45,8 @@ def markdown_links(text: str) -> list[str]:
     text = prose(text)
     # Inline links/images and full reference definitions. Inline code is not a link.
     text = re.sub(r"`+[^`\n]*`+", "", text)
-    inline = re.findall(r"!?\[[^\]\n]*\]\(\s*(<[^>]+>|[^\s)]+)", text)
+    # Match each destination marker, including both targets in [![alt](a.png)](b.md).
+    inline = re.findall(r"\]\(\s*(<[^>]+>|[^\s)]+)", text)
     references = re.findall(r"(?m)^ {0,3}\[[^\]\n]+\]:\s*(<[^>]+>|\S+)", text)
     return [item.strip("<>") for item in inline + references]
 
@@ -84,17 +96,16 @@ def link_errors(root: Path, files: set[str], source: str, text: str) -> list[str
 
 
 def neutral_source(path: str) -> bool:
-    return path.startswith(("src/core/", "src/ui/")) or path in {
-        "src/window_info.h", "src/windows_window_scanner.h", "src/windows_window_scanner.cpp",
-        "src/platform/window_api_adapter.h", "src/platform/layout_executor.h",
-        "src/platform/layout_executor.cpp",
-    }
+    return path.startswith(NEUTRAL_PREFIXES) or path in NEUTRAL_FILES
 
 
 def boundary_errors(path: str, text: str) -> list[str]:
     if not neutral_source(path) or not path.endswith((".h", ".hpp", ".cpp")):
         return []
-    code = re.sub(r"/\*.*?\*/|//[^\n]*", "", text, flags=re.S)
+    # Raw strings can contain comment markers and native-looking examples.
+    code = re.sub(r'(?:u8|u|U|L)?R"(?P<delimiter>[^ ()\\\t\r\n]{0,16})\(.*?\)(?P=delimiter)"',
+                  '""', text, flags=re.S)
+    code = re.sub(r"/\*.*?\*/|//[^\n]*", "", code, flags=re.S)
     native_include = re.search(r'^\s*#\s*include\s*[<"](?:windows\.h|windowsx\.h|dwmapi\.h|X11/)', code, re.I | re.M)
     # Exclude string literals before looking for native type tokens.
     code = re.sub(r'"(?:\\.|[^"\\])*"', '""', code)
@@ -113,6 +124,9 @@ def artifact_errors(path: str) -> list[str]:
 def check_files(root: Path, paths: list[str]) -> list[str]:
     errors = []
     files = set(paths)
+    missing_targets = sorted(NEUTRAL_FILES - files)
+    if missing_targets:
+        errors.append("boundary check targets missing: " + ", ".join(missing_targets))
     for path in paths:
         errors.extend(artifact_errors(path))
         file = root / path

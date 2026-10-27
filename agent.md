@@ -37,7 +37,7 @@
 
 - 每个大任务使用独立分支和 worktree，例如：`git worktree add -b feat/workspace-manager ../crossdesk-workspace-manager main`。先确认本地基线与远端状态，再选择起点。
 - 分支使用 `<conventional-type>/<小写-kebab-主题>`；类型为 `build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test`。新分支不使用人名、`claude/*` 或 `codex/*`；已有分支不因本规范自动重命名。
-- 集成目标为 `main`；C 已采用 `主题分支 → c → main` 的角色分支流向。两级均通过 PR 和 CI，不直接 push 集成分支，不改写公共历史；合入 `c` 不强制人工 Approve，进入 `main` 时完成组员评审。具体流向与保护见[仓库维护](docs/repository-maintenance.md)；新增其他角色/发布分支前先记录流向与保护规则。
+- 集成目标为 `main`；C 已采用 `主题分支 → c → main` 的角色分支流向。两级均通过 PR 和 CI，不直接 push 集成分支；所有已推送分支禁止 force-push，使用 merge 同步。合入 `c` 不强制人工 Approve，进入 `main` 时完成组员评审。具体流向与保护见[仓库维护](docs/repository-maintenance.md)；新增其他角色/发布分支前先记录流向与保护规则。
 - 未准备提交评审的工作保留本地。推送主题分支时同时创建对应 PR；未就绪时使用 GitHub Draft，并给标题加 `WIP: `，完成后再转为可评审。
 - 提交遵循 Conventional Commits，例如 `fix: handle closed windows during refresh`。Agent 参与的提交在正文注明来源，例如 `Agent: Codex`。
 - 禁止 `git add -A`；按明确路径暂存，提交前用 `git status --short` 和 `git diff --cached` 核对每个文件的来源和内容。

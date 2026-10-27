@@ -1,4 +1,5 @@
 {
+  "$comment": "This file documents settings applied manually; verify the live result through the GitHub API.",
   "repository": {
     "delete_branch_on_merge": true
   },
