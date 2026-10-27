@@ -26,8 +26,9 @@ constexpr int kMaxTiled = 4;
 // 卡片之间的缝。
 constexpr int kGap = 10;
 
-// 第一张卡背后的影子：几层、每层往右下错开多少。
-constexpr int kShadowLayers = 3;
+// 每张卡背后的影子：几层、每层往右下错开多少。
+// 每张窗口卡都垫这么多层，像一叠窗口压在它下面，露出来的是右下那一圈。
+constexpr int kShadowLayers = 4;
 constexpr int kShadowStep = 10;
 constexpr int kShadowSpan = kShadowLayers * kShadowStep;
 
@@ -330,25 +331,34 @@ void CardStack::paintEvent(QPaintEvent*) {
     // 左栏自己一层底色，和右边的桌面画面分开，像任务栏挂在一块面板上。
     painter.fillRect(rect(), QColor(0x14, 0x17, 0x1c));
 
-    // ---- 第一张卡背后的影子界面 ----
-    // 三层圆角板，每层往右下错开 10px：像一叠卡压在这张下面，露出来的是右下那一圈。
-    // 只画第一张的——它是这一摞的顶，影子代表"下面还压着东西"。
-    // 画在父控件上，所以一定在子控件（卡片）下面，卡片盖住的部分自动看不见。
-    if (m_shadowLayers > 0 && !m_shadowBase.isNull()) {
+    // ---- 每张卡背后的影子界面 ----
+    // 每张窗口卡都垫 kShadowLayers 层圆角板，每层往右下错开 10px：像一叠窗口压在
+    // 它下面，露出来的是右下那一圈。画在父控件上，子卡片盖住的部分自动看不见。
+    // 第一张的影子按"落位"(m_shadowBase)画：它被提起来时影子留在原地，才看得出"提"；
+    // 其余卡按各自几何画。
+    if (m_shadowLayers > 0 && !m_stacked) {
         painter.setRenderHint(QPainter::Antialiasing, true);
-        // 由远及近画：最远的最暗、也最靠右下，近的压在它上面。
-        for (int i = m_shadowLayers; i >= 1; --i) {
-            const int offset = i * kShadowStep;
-            QPainterPath layer;
-            layer.addRoundedRect(QRectF(m_shadowBase).translated(offset, offset), kCardRadius,
-                                 kCardRadius);
-            // 亮度随层数递减：远处退进背景里，近的明显一点，叠出厚度。
-            // 卡片被提起来时整体提亮一点：离桌面远了，影子该淡一些。
-            const int tone = 0x21 + (m_shadowLayers - i) * 7 + qRound(m_lift * 6);
-            painter.fillPath(layer, QColor(tone, tone + 5, tone + 11));
-            painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(QColor(255, 255, 255, 26), 1));
-            painter.drawPath(layer);
+        for (int c = 0; c < m_cards.size(); ++c) {
+            const QRect base = (c == 0 && !m_shadowBase.isNull())
+                                   ? m_shadowBase
+                                   : m_cards.at(c)->geometry();
+            if (base.isNull() || base.width() <= 0 || base.height() <= 0) {
+                continue;
+            }
+            // 由远及近画：最远的最暗、也最靠右下，近的压在它上面。
+            // 第一张被提起来时整体提亮一点：离桌面远了，影子该淡一些。
+            const int liftTone = (c == 0) ? qRound(m_lift * 6) : 0;
+            for (int i = m_shadowLayers; i >= 1; --i) {
+                const int offset = i * kShadowStep;
+                QPainterPath layer;
+                layer.addRoundedRect(QRectF(base).translated(offset, offset), kCardRadius,
+                                     kCardRadius);
+                const int tone = 0x21 + (m_shadowLayers - i) * 7 + liftTone;
+                painter.fillPath(layer, QColor(tone, tone + 5, tone + 11));
+                painter.setBrush(Qt::NoBrush);
+                painter.setPen(QPen(QColor(255, 255, 255, 26), 1));
+                painter.drawPath(layer);
+            }
         }
     }
 

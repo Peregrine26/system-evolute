@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CrossDesk 卡片预览 · 左栏窄 · 每卡4层影子</title>
+<style>
+  :root{
+    --col-bg:#14171c;
+    --card-bg:#1b1e25;
+    --card-sel:#242a35;
+    --screen-bg:#15181e;
+    --screen-border:rgba(255,255,255,0.063);
+    --bar-bg:#20242c;
+    --bar-sel:#2c3443;
+    --title:#d6dae1;
+    --title-sel:#f2f5f9;
+    --proc:#7d838d;
+    --accent:#0a84ff;
+    --card-border:rgba(255,255,255,0.078);
+    --sh4:#21262c; --sh3:#282d33; --sh2:#2f343a; --sh1:#363b41;
+    --sh-border:rgba(255,255,255,0.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:#0f1115;font:14px/1.4 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    color:var(--title);overflow:hidden;
+  }
+  .app{display:flex;height:100vh}
+  /* ---- 左栏：窄，铺满高度；卡片填满，每张背后4层影子 ---- */
+  .sidebar{
+    width:240px;flex:0 0 240px;background:var(--col-bg);
+    padding:12px;display:flex;flex-direction:column;gap:10px;
+    border-right:1px solid #242830;
+  }
+  .stack{display:flex;flex-direction:column;gap:10px;flex:1}
+  /* 卡片槽：宽 = 栏宽 - 边距*2 - 影子span(40)，右边留给4层影子露出 */
+  .slot{position:relative;width:176px;flex:1;min-height:80px}
+  /* 4 层影子：每层本身就是一个窗口，碰到哪层哪层单独上提 */
+  .shadow{position:absolute;inset:0;border-radius:10px;border:1px solid var(--sh-border);transition:transform .15s cubic-bezier(.2,.7,.3,1);cursor:pointer}
+  .sh-far{transform:translate(40px,40px);background:var(--sh4)}
+  .sh-3{transform:translate(30px,30px);background:var(--sh3)}
+  .sh-2{transform:translate(20px,20px);background:var(--sh2)}
+  .sh-near{transform:translate(10px,10px);background:var(--sh1)}
+  /* 每层影子碰到时单独上提 8px，但不浮到前面、不盖住前面的卡片 */
+  .sh-far:hover{transform:translate(40px,32px)}
+  .sh-3:hover{transform:translate(30px,22px)}
+  .sh-2:hover{transform:translate(20px,12px)}
+  .sh-near:hover{transform:translate(10px,2px)}
+  .card{
+    position:absolute;inset:0;border-radius:10px;background:var(--card-bg);
+    border:1px solid var(--card-border);overflow:hidden;cursor:pointer;
+    transition:transform .15s cubic-bezier(.2,.7,.3,1),border-color .12s,background .12s;
+  }
+  .slot.selected .card{background:var(--card-sel);border:2px solid var(--accent)}
+  /* 光标碰到哪张卡，只有那张卡往上抬 8px；影子留在原地 */
+  .slot:hover .card{transform:translateY(-8px)}
+  /* 预览区：填满整张卡，不要标题条/进程名 */
+  .screen{
+    position:absolute;left:0;top:0;right:0;bottom:0;
+    background:var(--screen-bg);overflow:hidden;
+  }
+  .screen .topbar{height:18px;background:#2b303a}
+  .screen .body{display:flex;height:calc(100% - 18px)}
+  .screen .side{width:14%;background:rgba(255,255,255,0.03)}
+  .screen .lines{flex:1;padding:10px;display:flex;flex-direction:column;gap:7px}
+  .screen .lines i{display:block;height:4px;border-radius:2px;background:rgba(255,255,255,0.055)}
+  .screen .lines i:nth-child(1){width:90%}
+  .screen .lines i:nth-child(2){width:68%}
+  .screen .lines i:nth-child(3){width:82%}
+  .screen .lines i:nth-child(4){width:55%}
+  .label{position:absolute;left:0;right:0;bottom:0;height:46px;background:var(--bar-bg);padding:6px 12px}
+  .slot.selected .label{background:var(--bar-sel)}
+  .label .t{font-size:13px;font-weight:700;color:var(--title);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .slot.selected .label .t{color:var(--title-sel)}
+  .label .p{font-size:11px;color:var(--proc);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dot{position:absolute;right:12px;top:8px;width:7px;height:7px;border-radius:50%;background:var(--accent);display:none}
+  .slot.selected .dot{display:block}
+  /* ---- 右侧预览：铺满 ---- */
+  .preview{flex:1;display:flex;flex-direction:column;background:#0f1115;min-width:0}
+  .pv-title{padding:14px 20px;font-size:15px;font-weight:700;color:var(--title-sel);border-bottom:1px solid #242830}
+  .pv-body{flex:1;padding:0;display:flex}
+  .pv-frame{flex:1;background:var(--screen-bg);overflow:hidden}
+  .pv-frame .topbar{height:30px;background:#2b303a;display:flex;align-items:center;padding:0 12px;gap:8px}
+  .pv-frame .topbar i{width:10px;height:10px;border-radius:50%;background:#3a3f48}
+  .pv-frame .body{display:flex;height:calc(100% - 30px)}
+  .pv-frame .side{width:14%;background:rgba(255,255,255,0.03)}
+  .pv-frame .lines{flex:1;padding:16px;display:flex;flex-direction:column;gap:11px}
+  .pv-frame .lines i{display:block;height:6px;border-radius:3px;background:rgba(255,255,255,0.06)}
+  .pv-frame .lines i:nth-child(1){width:88%}
+  .pv-frame .lines i:nth-child(2){width:64%}
+  .pv-frame .lines i:nth-child(3){width:78%}
+  .pv-frame .lines i:nth-child(4){width:50%}
+  .pv-frame .lines i:nth-child(5){width:72%}
+  .hint{padding:12px 20px;font-size:12px;color:#6b7079;border-top:1px solid #242830}
+  /* ---- Task View：右键展开，全屏不分左右，背景模糊 ---- */
+  .taskview{
+    position:fixed;inset:0;background:rgba(15,17,21,0.55);
+    backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    display:none;align-items:center;justify-content:center;z-index:50;
+  }
+  .taskview.show{display:flex}
+  .tv-grid{display:flex;gap:24px;padding:40px;justify-content:center;flex-wrap:wrap;align-items:center}
+  .tv-card{
+    position:relative;width:240px;height:150px;border-radius:10px;background:var(--card-bg);
+    border:2px solid transparent;overflow:hidden;cursor:pointer;flex:0 0 auto;
+    transition:transform .15s cubic-bezier(.2,.7,.3,1),border-color .12s;
+    box-shadow:0 10px 24px rgba(0,0,0,0.4);
+  }
+  .tv-card:hover{transform:translateY(-10px)}
+  .tv-card.sel{border-color:var(--accent)}
+  .tv-card .screen{position:absolute;left:0;top:0;right:0;bottom:38px;background:var(--screen-bg);overflow:hidden}
+  .tv-card .screen .topbar{height:20px;background:#2b303a}
+  .tv-card .screen .body{display:flex;height:calc(100% - 20px)}
+  .tv-card .screen .side{width:14%;background:rgba(255,255,255,0.03)}
+  .tv-card .screen .lines{flex:1;padding:12px;display:flex;flex-direction:column;gap:8px}
+  .tv-card .screen .lines i{display:block;height:5px;border-radius:2px;background:rgba(255,255,255,0.055)}
+  .tv-card .screen .lines i:nth-child(1){width:90%}
+  .tv-card .screen .lines i:nth-child(2){width:68%}
+  .tv-card .screen .lines i:nth-child(3){width:82%}
+  .tv-card .t{
+    position:absolute;left:0;right:0;bottom:0;height:38px;background:var(--bar-bg);
+    padding:8px 14px;font-size:13px;font-weight:700;color:var(--title);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .tv-card.sel .t{background:var(--bar-sel);color:var(--title-sel)}
+  .tv-hint{position:absolute;bottom:18px;left:0;right:0;text-align:center;font-size:12px;color:#8a8f99}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="stack" id="stack"></div>
+  </aside>
+  <section class="preview">
+    <div class="pv-body">
+      <div class="pv-frame">
+        <div class="topbar"><i></i><i></i><i></i></div>
+        <div class="body"><div class="side"></div><div class="lines"><i></i><i></i><i></i><i></i><i></i></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+<!-- Task View：右键窗口后展开 -->
+<div class="taskview" id="taskview">
+  <div class="tv-grid" id="tvGrid"></div>
+  <div class="tv-hint">右键展开子窗口（最多 4 个）· 点空白或按 Esc 返回</div>
+</div>
+<script>
+const wins=[
+  {id:2,title:"项目资料",proc:"explorer.exe"},
+  {id:3,title:"CrossDesk 需求讨论 - 浏览器",proc:"chrome.exe"},
+  {id:1,title:"未命名 - 记事本",proc:"notepad.exe"},
+  {id:4,title:"设置",proc:"SystemSettings.exe"},
+  {id:5,title:"第 5 个窗口",proc:"app0.exe"},
+  {id:6,title:"第 6 个窗口",proc:"app1.exe"},
+  {id:7,title:"第 7 个窗口",proc:"app2.exe"},
+  {id:8,title:"第 8 个窗口",proc:"app3.exe"},
+  {id:9,title:"第 9 个窗口",proc:"app4.exe"},
+  {id:10,title:"第 10 个窗口",proc:"app5.exe"},
+  {id:11,title:"第 11 个窗口",proc:"app6.exe"},
+  {id:12,title:"第 12 个窗口",proc:"app7.exe"}
+];
+const stack=document.getElementById('stack');
+let selected=2;
+// 左栏固定最多 4 张卡；其余窗口只在 Task View（右键）里出现
+const kLeftMax=4;
+function render(){
+  stack.innerHTML='';
+  wins.slice(0,kLeftMax).forEach(w=>{
+    const slot=document.createElement('div');
+    slot.className='slot'+(w.id===selected?' selected':'');
+    slot.dataset.id=w.id;
+    slot.innerHTML=`
+      <div class="shadow sh-far"></div>
+      <div class="shadow sh-3"></div>
+      <div class="shadow sh-2"></div>
+      <div class="shadow sh-near"></div>
+      <div class="card">
+        <div class="screen">
+          <div class="topbar"></div>
+          <div class="body"><div class="side"></div><div class="lines"><i></i><i></i><i></i><i></i></div></div>
+        </div>
+      </div>`;
+    slot.addEventListener('click',()=>{
+      selected=w.id;
+      render();
+    });
+    // 右键窗口 → 展开 Task View，所有窗口铺开
+    slot.addEventListener('contextmenu',(e)=>{
+      e.preventDefault();
+      selected=w.id;
+      openTaskView();
+    });
+    stack.appendChild(slot);
+  });
+}
+// ---- Task View ----
+const tv=document.getElementById('taskview');
+const tvGrid=document.getElementById('tvGrid');
+function openTaskView(){
+  const host=wins.find(w=>w.id===selected)||wins[0];
+  tvGrid.innerHTML='';
+  // 右键展开的是该窗口背后的子窗口（影子层），最多 4 个小窗口
+  for(let i=1;i<=4;i++){
+    const c=document.createElement('div');
+    c.className='tv-card';
+    c.innerHTML=`
+      <div class="screen">
+        <div class="topbar"></div>
+        <div class="body"><div class="side"></div><div class="lines"><i></i><i></i><i></i><i></i></div></div>
+      </div>
+      <div class="t">${host.title} · 子窗口 ${i}</div>`;
+    c.addEventListener('click',(ev)=>{
+      ev.stopPropagation();
+      closeTaskView();
+    });
+    tvGrid.appendChild(c);
+  }
+  tv.classList.add('show');
+}
+function closeTaskView(){tv.classList.remove('show')}
+// 点空白或 Esc 返回
+tv.addEventListener('click',(e)=>{ if(e.target===tv) closeTaskView() });
+document.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeTaskView() });
+render();
+</script>
+</body>
+</html>

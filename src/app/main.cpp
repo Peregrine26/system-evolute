@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
     // 默认走真实窗口：这是 M1 要的东西，"空壳感"也主要来自假数据。
     // --fake 保留一个不依赖平台接口的完整可演示版本；
     // --fake-many 给八个窗口，用来看"卡片叠起来"的样子；
-    // --fake-count N 想验几档就看几档（5 是第一档叠影，20 是压扁的边界）。
+    // --fake-count N 想验几档就看几档（5 是第一档叠影）。现在先做到最多 16 个窗口。
     std::unique_ptr<crossdesk::ui::CrossDeskService> service;
     const bool forceFake = args.contains(QStringLiteral("--fake")) ||
                            args.contains(QStringLiteral("--fake-many")) ||
@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
         }
         const int custom = argValue(args, QStringLiteral("--fake-count")).toInt();
         if (custom > 0) {
-            count = qBound(1, custom, 40);
+            count = qBound(1, custom, 16);
         }
         service = std::make_unique<crossdesk::ui::FakeService>(nullptr, count);
     }
