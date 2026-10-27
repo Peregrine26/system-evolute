@@ -110,8 +110,9 @@ QRect WindowCard::screenRect() const {
 }
 
 QRect WindowCard::contentRect() const {
-    if (m_compact || width() <= 24 || height() <= 66) return {};
-    return {12, 12, width() - 24, height() - 66};
+    if (m_compact || width() <= 4 || height() <= 4) return {};
+    // 画面区填满整张卡，只留 1px 给边框。
+    return {1, 1, width() - 2, height() - 2};
 }
 
 QRect WindowCard::previewRect() const {
@@ -166,20 +167,18 @@ void WindowCard::paintEvent(QPaintEvent*) {
 
     painter.fillPath(cardPath, m_selected ? QColor(0x24, 0x2a, 0x35) : QColor(0x1b, 0x1e, 0x25));
 
-    // ---- 画面区：一块小窗口 ----
-    const int textTop = height() - kTextHeight;
-    const QRectF screen = QRectF(12, 12, width() - 24, qMax(20, textTop - 12 - 8));
+    // ---- 画面区：填满整张卡，不再留标题条/进程名 ----
+    const QRectF screen = QRectF(0, 0, width(), height());
     QPainterPath screenPath;
-    screenPath.addRoundedRect(screen, 6, 6);
+    screenPath.addRoundedRect(screen, kCardRadius, kCardRadius);
     painter.fillPath(screenPath, QColor(0x15, 0x18, 0x1e));
 
     if (!m_preview.isNull()) {
         painter.save();
         painter.setClipPath(screenPath);
         const QPixmap scaled =
-            m_preview.scaled(screen.size().toSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        painter.drawPixmap(screen.center().toPoint() - QPoint(scaled.width() / 2, scaled.height() / 2),
-                           scaled);
+            m_preview.scaled(screen.size().toSize(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        painter.drawPixmap(screen.topLeft().toPoint(), scaled);
         painter.restore();
     } else if (screen.height() > 40) {
         // 占位：窗口标题栏 + 左侧窄栏 + 几行短横线。
@@ -211,43 +210,10 @@ void WindowCard::paintEvent(QPaintEvent*) {
         painter.restore();
     }
 
-    painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(QColor(255, 255, 255, 16), 1));
-    painter.drawPath(screenPath);
-
-    // ---- 下面那行字：给一块略亮的底，叠起来时露出的就是这条"标题条" ----
-    painter.save();
-    painter.setClipPath(cardPath);
-    painter.fillRect(QRectF(0, textTop, width(), height() - textTop),
-                     m_selected ? QColor(0x2c, 0x34, 0x43) : QColor(0x20, 0x24, 0x2c));
-    painter.restore();
-
-    const QString title = m_title.isEmpty() ? QStringLiteral("（无标题窗口）") : m_title;
-    QFont titleFont = font();
-    titleFont.setPixelSize(13);
-    titleFont.setBold(true);
-    painter.setFont(titleFont);
-    painter.setPen(m_selected ? QColor(0xf2, 0xf5, 0xf9) : QColor(0xd6, 0xda, 0xe1));
-    painter.drawText(QRect(12, textTop, width() - 24, 18), Qt::AlignLeft | Qt::AlignVCenter,
-                     QFontMetrics(titleFont).elidedText(title, Qt::ElideRight, width() - 24));
-
-    QFont subFont = font();
-    subFont.setPixelSize(11);
-    painter.setFont(subFont);
-    painter.setPen(QColor(0x7d, 0x83, 0x8d));
-    painter.drawText(QRect(12, textTop + 19, width() - 24, 16), Qt::AlignLeft | Qt::AlignVCenter,
-                     QFontMetrics(subFont).elidedText(m_process, Qt::ElideRight, width() - 24));
-
-    // ---- 选中：蓝边 + 右侧小圆点 ----
+    // ---- 选中：蓝边（不再画标题条/圆点）----
     painter.setBrush(Qt::NoBrush);
     painter.setPen(QPen(m_selected ? kAccent : QColor(255, 255, 255, 20), m_selected ? 2.0 : 1.0));
     painter.drawPath(cardPath);
-
-    if (m_selected) {
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(kAccent);
-        painter.drawEllipse(QPointF(width() - 16, textTop + 9), 3.5, 3.5);
-    }
 
     // 越深压得越暗：一摞叠起来时，后面的本来就该退到阴影里。
     if (m_depth > 0) {
@@ -291,7 +257,8 @@ CardStack::CardStack(QWidget* parent) : QWidget(parent) {
 }
 
 void CardStack::setWindows(const QVector<WindowItem>& windows) {
-    m_windows = windows;
+    // 左栏固定最多 4 张卡：多余的窗口不占左栏位置（后续由 Task View 展开）。
+    m_windows = windows.mid(0, kMaxTiled);
     rebuildCards();
     relayout();
 }
@@ -339,15 +306,14 @@ void CardStack::paintEvent(QPaintEvent*) {
     if (m_shadowLayers > 0 && !m_stacked) {
         painter.setRenderHint(QPainter::Antialiasing, true);
         for (int c = 0; c < m_cards.size(); ++c) {
-            const QRect base = (c == 0 && !m_shadowBase.isNull())
-                                   ? m_shadowBase
-                                   : m_cards.at(c)->geometry();
+            // 影子按"落位"画：卡片被悬停提起时影子留在原地，才看得出是"提"。
+            const QRect base = m_restGeo.value(c, m_cards.at(c)->geometry());
             if (base.isNull() || base.width() <= 0 || base.height() <= 0) {
                 continue;
             }
             // 由远及近画：最远的最暗、也最靠右下，近的压在它上面。
             // 第一张被提起来时整体提亮一点：离桌面远了，影子该淡一些。
-            const int liftTone = (c == 0) ? qRound(m_lift * 6) : 0;
+            const int liftTone = (c == m_hoveredCard) ? qRound(m_lift * 6) : 0;
             for (int i = m_shadowLayers; i >= 1; --i) {
                 const int offset = i * kShadowStep;
                 QPainterPath layer;
@@ -502,6 +468,12 @@ void CardStack::relayout(bool animated) {
         m_shadowBase = QRect(kMargin, top, width, cardHeight);
     }
 
+    // 记下每张卡的落位：悬停上提从落位往上抬，影子按落位画（卡片动时影子不动）。
+    m_restGeo.clear();
+    for (int i = 0; i < m_cards.size(); ++i) {
+        m_restGeo.append(m_cards.at(i)->geometry());
+    }
+
     // i=0 最后 raise，所以它压在最上面：视觉上"第一张在最前面"。
     for (int i = count - 1; i >= 0; --i) {
         m_cards.at(i)->raise();
@@ -576,21 +548,21 @@ void CardStack::updateHover(const QPoint& pos) {
     if (m_dragging) {
         return;
     }
-    const bool onEdge = onShadowEdge(pos);
-    if (onEdge == m_hoverEdge) {
+    // 悬停哪张卡就提哪张（任意一张，不只第一张）。
+    const int h = cardIndexAt(pos);
+    if (h == m_hoveredCard) {
         return;
     }
-    m_hoverEdge = onEdge;
-    setCursor(onEdge ? Qt::OpenHandCursor : Qt::ArrowCursor);
-    setLiftTarget(onEdge);
+    m_hoveredCard = h;
+    setLiftTarget(h >= 0);
 }
 
 void CardStack::setLiftTarget(bool on) {
     if (!m_liftAnim) {
         return;
     }
-    if (on && !m_cards.isEmpty()) {
-        for (auto* anim : m_cards.first()->findChildren<QPropertyAnimation*>(
+    if (on && m_hoveredCard >= 0 && m_hoveredCard < m_cards.size()) {
+        for (auto* anim : m_cards.at(m_hoveredCard)->findChildren<QPropertyAnimation*>(
                  QString(), Qt::FindDirectChildrenOnly)) {
             if (anim->propertyName() == "geometry") { anim->stop(); anim->deleteLater(); }
         }
@@ -601,15 +573,19 @@ void CardStack::setLiftTarget(bool on) {
     m_liftAnim->start();
 }
 
-// 把"提起进度"落到几何上：只有 y 变，尺寸一点不改——四张还是同样大。
+// 把"提起进度"落到几何上：只有 y 变，尺寸一点不改；提的是悬停的那张。
 void CardStack::applyLift() {
-    if (m_cards.isEmpty() || m_shadowLayers <= 0 || m_shadowBase.isNull() || m_dragging) {
+    if (m_dragging || m_hoveredCard < 0 || m_hoveredCard >= m_cards.size()) {
         return;
     }
-    WindowCard* first = m_cards.first();
-    const QRect target = m_shadowBase.translated(0, -qRound(m_lift * kLiftHeight));
-    if (first->geometry() != target) {
-        first->setGeometry(target);
+    const QRect rest = m_restGeo.value(m_hoveredCard);
+    if (rest.isNull()) {
+        return;
+    }
+    const QRect target = rest.translated(0, -qRound(m_lift * kLiftHeight));
+    WindowCard* card = m_cards.at(m_hoveredCard);
+    if (card->geometry() != target) {
+        card->setGeometry(target);
     }
     update();  // 卡片让开的地方要露出影子，得跟着重画
 }
@@ -620,8 +596,13 @@ void CardStack::clearLift() {
         m_liftAnim->stop();
     }
     m_lift = 0.0;
-    m_hoverEdge = false;
-    unsetCursor();
+    m_hoveredCard = -1;
+    // 落回各自落位，别让谁悬在半空。
+    for (int i = 0; i < m_cards.size() && i < m_restGeo.size(); ++i) {
+        if (m_cards.at(i)->geometry() != m_restGeo.at(i)) {
+            m_cards.at(i)->setGeometry(m_restGeo.at(i));
+        }
+    }
 }
 
 void CardStack::promote(int index) {
@@ -682,9 +663,7 @@ void CardStack::mouseMoveEvent(QMouseEvent* event) {
 void CardStack::leaveEvent(QEvent* event) {
     // 鼠标离开整条栏：提起来的那张落回去，不然它会一直悬在半空。
     if (!m_dragging) {
-        m_hoverEdge = false;
         setLiftTarget(false);
-        unsetCursor();
     }
     QWidget::leaveEvent(event);
 }

@@ -137,6 +137,9 @@ private:
     // 影子画在哪：第一张卡的"落位"，不是它当前的位置。
     // 拖动时卡片跑开、影子留在原地，才看得出是从那一摞里抽出来的。
     QRect m_shadowBase;
+    // 每张卡的落位（relayout 时记下）：悬停上提时从落位往上抬，影子按落位画不动。
+    QVector<QRect> m_restGeo;
+    int m_hoveredCard = -1;  // 当前悬停的卡（-1 = 无）
 
     // 提起程度 0..1，配一段 140ms 的补间：0 = 落位，1 = 抬起 kLiftHeight。
     qreal m_lift = 0.0;
