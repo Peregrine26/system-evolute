@@ -202,7 +202,13 @@ void MainWindow::connectService() {
 
     connect(m_cards, &CardStack::windowClicked, this, &MainWindow::onCardClicked);
     connect(m_cards, &CardStack::windowActivated, this, &MainWindow::onCardActivated);
-    connect(m_cards, &CardStack::windowContextMenu, this, [this](WindowId) { openTaskView(); });
+    connect(m_cards, &CardStack::windowContextMenu, this, [this](WindowId id) {
+        if (id != 0) {
+            m_selected = id;
+            m_cards->setSelected(id);
+        }
+        openTaskView();
+    });
 }
 
 void MainWindow::setAllowHide(bool allow) {

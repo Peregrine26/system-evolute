@@ -373,8 +373,17 @@ int CardStack::shadowSpan() const {
 }
 
 // 右键窗口：发信号给主窗口，展开 Task View。
+// 每张卡的"本体 + 它背后的影子区域"都算这张卡，这样四张都能右键，不只第一张。
 void CardStack::contextMenuEvent(QContextMenuEvent* event) {
-    const int index = cardIndexAt(event->pos());
+    const QPoint pos = event->pos();
+    int index = -1;
+    for (int i = 0; i < m_cards.size(); ++i) {
+        const QRect r = m_cards.at(i)->geometry();
+        if (r.contains(pos) || r.adjusted(0, 0, kShadowSpan, kShadowSpan).contains(pos)) {
+            index = i;
+            break;
+        }
+    }
     if (index >= 0 && index < m_cards.size()) {
         emit windowContextMenu(m_cards.at(index)->windowId());
     }
