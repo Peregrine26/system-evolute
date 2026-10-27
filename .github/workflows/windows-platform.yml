@@ -14,8 +14,8 @@ jobs:
         run: cmake -S . -B build-platform -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=OFF
       - name: Build
         run: cmake --build build-platform --config Debug --parallel
-      - name: Test layout integration without desktop operations
-        run: ctest --test-dir build-platform -C Debug -R "^layout_executor_test$" --output-on-failure
+      - name: Test core logic and layout integration without desktop operations
+        run: ctest --test-dir build-platform -C Debug -R "^(layout_executor_test|core_tests|pipeline_tests)$" --output-on-failure
 
   qt:
     runs-on: windows-2022
