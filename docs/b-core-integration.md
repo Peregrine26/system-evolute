@@ -22,7 +22,7 @@
 ```powershell
 cmake -S . -B build-core -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=OFF
 cmake --build build-core --config Release
-ctest --test-dir build-core -C Release
+ctest --test-dir build-core -C Release -LE interactive-desktop
 ```
 
 本机实测（Windows 11、MSVC 14.44、Release）：
