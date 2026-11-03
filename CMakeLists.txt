@@ -25,6 +25,31 @@ target_include_directories(crossdesk_window_api INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+# Core logic (B): filtering, selection validation and two-window layout.
+# Pure C++17 on purpose - no Win32, no Qt - so it builds on every platform and
+# its tests run without a desktop.
+add_library(crossdesk_core STATIC
+    src/core/window_filter.cpp
+    src/core/window_layout.cpp
+    src/core/window_selection.cpp
+)
+target_link_libraries(crossdesk_core PUBLIC crossdesk_window_api)
+
+# The core holds Chinese user-facing messages; without /utf-8 MSVC reads them in
+# the system code page and mangles the literals.
+if(MSVC)
+    target_compile_options(crossdesk_core PRIVATE /utf-8)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(crossdesk_core_tests tests/core_tests.cpp)
+    target_link_libraries(crossdesk_core_tests PRIVATE crossdesk_core)
+    if(MSVC)
+        target_compile_options(crossdesk_core_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME core_tests COMMAND crossdesk_core_tests)
+endif()
+
 if(CROSSDESK_BUILD_SCANNER)
     if(NOT WIN32)
         message(FATAL_ERROR "The scanner example currently requires Windows.")
@@ -86,6 +111,18 @@ if(CROSSDESK_BUILD_SCANNER)
         add_test(NAME desktop_services_selftest COMMAND crossdesk_desktop_services_selftest)
         set_tests_properties(win32_backend_selftest desktop_services_selftest PROPERTIES
             LABELS "interactive-desktop")
+
+        # A -> B seam: the real scanner and layout executor driven by a fake
+        # adapter, so the whole hand-over runs without a real desktop.
+        add_executable(crossdesk_pipeline_tests tests/pipeline_tests.cpp)
+        target_link_libraries(crossdesk_pipeline_tests PRIVATE
+            crossdesk_core
+            crossdesk_window_scanner_lib
+        )
+        if(MSVC)
+            target_compile_options(crossdesk_pipeline_tests PRIVATE /utf-8)
+        endif()
+        add_test(NAME pipeline_tests COMMAND crossdesk_pipeline_tests)
     endif()
 endif()
 
