@@ -84,7 +84,7 @@ result.complete = api_.enumerate_top_level_windows(...);   // 只看 EnumWindows
 
 `complete` 只反映「枚举有没有跑完」。但回调里 `get_window_bounds()` 失败时仍然是 `return true` 跳过该窗口——**这个窗口从列表里消失，而 `complete` 依旧是 `true`**。`GetWindowRect` 在窗口正在销毁、位于其他虚拟桌面、权限不足时都会失败，于是核心会对着一个还开着的窗口报「已关闭」。
 
-`pipeline` 场景 6 把这个行为钉成了断言：扫描只返回 4 个窗口、`complete == true`，而 `validateSelection` 对浏览器给出 `WindowGone`。
+`pipeline` 场景 6 用 `CHECK_CURRENT_KNOWN_BEHAVIOR`（而非普通 `CHECK`）钉住这个行为：扫描只返回 4 个窗口、`complete == true`，而 `validateSelection` 对浏览器给出 `WindowGone`。宏名本身即标注——这不是期望行为，A 修复 `complete` 语义后须翻转或删除对应断言（翻转条件写在场景 6 的注释里）。
 
 建议的最小改法（对 B、C 都没有影响）：
 

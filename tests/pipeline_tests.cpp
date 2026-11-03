@@ -45,6 +45,15 @@ void check(bool ok, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
+// A CHECK variant for assertions that pin a *current* (possibly wrong)
+// behavior rather than a desired one. The macro name is the reminder: when the
+// underlying issue is fixed, every CHECK_CURRENT_KNOWN_BEHAVIOR site MUST be
+// revisited — flip the condition or delete the assertion.
+//
+// Currently used only in scenario 6; see docs/b-core-integration.md §3.
+#define CHECK_CURRENT_KNOWN_BEHAVIOR(cond) \
+    check((cond), "[KNOWN-BEHAVIOR] " #cond, __LINE__)
+
 void section(const char* name) { std::cout << "\n=== " << name << " ===\n"; }
 
 void enableUtf8Console() {
@@ -384,7 +393,7 @@ void scenario5_incomplete_scan() {
 }
 
 void scenario6_failed_query_still_silent() {
-    section("Scenario 6: a window lost to a failed query still looks closed");
+    section("Scenario 6: a window lost to a failed query still looks closed (KNOWN BUG)");
 
     std::vector<FakeWindow> windows = desktop();
     const NativeWindowHandle failing = windows[1].handle;  // browser
@@ -394,15 +403,33 @@ void scenario6_failed_query_still_silent() {
     const WindowsWindowScanner scanner(api);
     const WindowScanResult scan = scanner.scan_with_status();
 
-    // EnumWindows itself succeeded, so `complete` stays true even though one
-    // window is missing from the list.
-    CHECK(scan.complete);
-    CHECK(scan.windows.size() == 4);
+    // -----------------------------------------------------------------------
+    // KNOWN BEHAVIOR (not desired):
+    //   EnumWindows itself succeeded, so `complete` stays true even though the
+    //   browser's get_window_bounds() failed and the scanner silently dropped
+    //   it from the list. The window count is 4 (not 5), and validateSelection
+    //   reports a still-open window as WindowGone.
+    //
+    // Root cause: A's scan_with_status() sets `complete` from the enumeration
+    // return value only; a per-window query failure does not flip it.
+    // See docs/b-core-integration.md §3 for the three-line fix on A's side.
+    //
+    // When the fix lands (A marks the scan incomplete on per-window failure),
+    // flip the assertions below and drop the KNOWN-BEHAVIOR macro:
+    //   CHECK_CURRENT_KNOWN_BEHAVIOR(scan.complete)
+    //       ->  CHECK(!scan.complete)
+    //   CHECK_CURRENT_KNOWN_BEHAVIOR(scan.windows.size() == 4)
+    //       ->  CHECK(scan.windows.size() == 5)   // browser back in the list
+    //   CHECK_CURRENT_KNOWN_BEHAVIOR(verdict.error == SelectionError::WindowGone)
+    //       ->  CHECK(verdict.error == SelectionError::ScanIncomplete)
+    // -----------------------------------------------------------------------
+    CHECK_CURRENT_KNOWN_BEHAVIOR(scan.complete);
+    CHECK_CURRENT_KNOWN_BEHAVIOR(scan.windows.size() == 4);
 
     const ScanSnapshot snapshot{scan.windows, scan.complete};
     const SelectionResult verdict =
         validateSelection(snapshot, 0x0000000000010A2Cu, failing);
-    CHECK(verdict.error == SelectionError::WindowGone);
+    CHECK_CURRENT_KNOWN_BEHAVIOR(verdict.error == SelectionError::WindowGone);
     std::cout << "    core verdict: " << verdict.message << "\n";
     std::cout << "    open issue: `complete` only tracks the enumeration result, so a\n"
                  "    per-window query failure still turns a live window into 'closed'\n";
