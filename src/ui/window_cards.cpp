@@ -65,6 +65,14 @@ void WindowCard::setSelected(bool on) {
     update();
 }
 
+void WindowCard::setSecondary(bool on) {
+    if (m_secondary == on) {
+        return;
+    }
+    m_secondary = on;
+    update();
+}
+
 void WindowCard::setOverlapped(bool on) {
     if (m_overlapped == on) {
         return;
@@ -213,8 +221,28 @@ void WindowCard::paintEvent(QPaintEvent*) {
 
     // ---- 选中：蓝边（不再画标题条/圆点）----
     painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(m_selected ? kAccent : QColor(255, 255, 255, 20), m_selected ? 2.0 : 1.0));
+    if (m_selected) {
+        painter.setPen(QPen(kAccent, 2.0));
+    } else if (m_secondary) {
+        painter.setPen(QPen(QColor(0x5a, 0x9e, 0xff), 1.6));  // 第二选中：浅蓝
+    } else {
+        painter.setPen(QPen(QColor(255, 255, 255, 20), 1.0));
+    }
     painter.drawPath(cardPath);
+
+    // 第二选中：左上角画"2"角标，和主选中区分
+    if (m_secondary) {
+        const QRectF badge(4, 4, 18, 18);
+        QPainterPath bp;
+        bp.addRoundedRect(badge, 4, 4);
+        painter.fillPath(bp, QColor(0x5a, 0x9e, 0xff));
+        QFont bf = font();
+        bf.setPixelSize(11);
+        bf.setBold(true);
+        painter.setFont(bf);
+        painter.setPen(Qt::white);
+        painter.drawText(badge, Qt::AlignCenter, QStringLiteral("2"));
+    }
 
     // 越深压得越暗：一摞叠起来时，后面的本来就该退到阴影里。
     if (m_depth > 0) {
@@ -258,8 +286,7 @@ CardStack::CardStack(QWidget* parent) : QWidget(parent) {
 }
 
 void CardStack::setWindows(const QVector<WindowItem>& windows) {
-    // 左栏固定最多 4 张卡：多余的窗口不占左栏位置（后续由 Task View 展开）。
-    m_windows = windows.mid(0, kMaxTiled);
+    m_windows = windows;
     rebuildCards();
     relayout();
 }
@@ -278,6 +305,7 @@ void CardStack::rebuildCards() {
         WindowCard* card = m_cards.at(i);
         card->setWindow(m_windows.at(i));
         card->setSelected(m_windows.at(i).id == m_selected);
+        card->setSecondary(m_windows.at(i).id == m_secondary);
         card->show();
     }
 }
@@ -286,6 +314,13 @@ void CardStack::setSelected(WindowId id) {
     m_selected = id;
     for (WindowCard* card : m_cards) {
         card->setSelected(card->windowId() == id);
+    }
+}
+
+void CardStack::setSecondarySelected(WindowId id) {
+    m_secondary = id;
+    for (WindowCard* card : m_cards) {
+        card->setSecondary(card->windowId() == id);
     }
 }
 
@@ -640,17 +675,25 @@ void CardStack::setLiftTarget(bool on) {
 
 // 把"提起进度"落到几何上：只有 y 变，尺寸一点不改；提的是悬停的那张。
 void CardStack::applyLift() {
-    if (m_dragging || m_hoveredCard < 0 || m_hoveredCard >= m_cards.size()) {
+    if (m_dragging || m_cards.isEmpty()) {
         return;
     }
-    const QRect rest = m_restGeo.value(m_hoveredCard);
-    if (rest.isNull()) {
-        return;
-    }
-    const QRect target = rest.translated(0, -qRound(m_lift * kLiftHeight));
-    WindowCard* card = m_cards.at(m_hoveredCard);
-    if (card->geometry() != target) {
-        card->setGeometry(target);
+    if (m_hoveredCard >= 0 && m_hoveredCard < m_cards.size()) {
+        const QRect rest = m_restGeo.value(m_hoveredCard);
+        if (!rest.isNull()) {
+            const QRect target = rest.translated(0, -qRound(m_lift * kLiftHeight));
+            WindowCard* card = m_cards.at(m_hoveredCard);
+            if (card->geometry() != target) {
+                card->setGeometry(target);
+            }
+        }
+    } else if (m_lift < 0.01) {
+        // 没有悬停的卡且提起进度归零：所有卡片落回各自落位
+        for (int i = 0; i < m_cards.size() && i < m_restGeo.size(); ++i) {
+            if (m_cards.at(i)->geometry() != m_restGeo.at(i)) {
+                m_cards.at(i)->setGeometry(m_restGeo.at(i));
+            }
+        }
     }
     update();  // 卡片让开的地方要露出影子，得跟着重画
 }

@@ -1,5 +1,6 @@
 #include "main_window.h"
 
+#include "layout_math.h"
 #include "preview_widgets.h"
 #include "window_cards.h"
 
@@ -7,10 +8,12 @@
 #include <QEasingCurve>
 #include <QGraphicsBlurEffect>
 #include <QGraphicsOpacityEffect>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPainter>
+#include <QPushButton>
 #include <QPropertyAnimation>
 #include <QResizeEvent>
 #include <QShortcut>
@@ -26,6 +29,10 @@ namespace {
 // 但也不能在 1366 的笔记本屏上占掉三分之一，所以按窗口宽度取比例再夹住。
 constexpr int kBarMinWidth = 260;
 constexpr int kBarMaxWidth = 380;
+
+// 左栏固定最多显示这么多张卡：多余的窗口不占左栏位置（右键 Task View 才看到）。
+// CardStack 本身支持任意数量（叠影/压缩），截断在 MainWindow 这层做。
+constexpr int kLeftMaxCards = 4;
 
 // ---- Task View：右键窗口后全屏展开子窗口，背景模糊，不分左右 ----
 class TaskView : public QWidget {
@@ -155,7 +162,11 @@ void MainWindow::buildUi() {
         "  border:1px solid rgba(255,255,255,0.10); border-radius:9px;"
         "  padding:5px 12px; color:#b9bfc8; font-size:12px; }"));
 
-    auto* root = new QHBoxLayout(this);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+
+    auto* root = new QHBoxLayout();
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
@@ -173,16 +184,51 @@ void MainWindow::buildUi() {
     m_canvas->setGraphicsEffect(m_sceneEffect);
     root->addWidget(m_canvas, 1);
 
+    outer->addLayout(root, 1);
+
+    // ---- M3 底部排列工具条：选了两个窗口（Ctrl+点第二张）才显示 ----
+    m_arrangeBar = new QWidget(this);
+    m_arrangeBar->setObjectName(QStringLiteral("arrangeBar"));
+    m_arrangeBar->setStyleSheet(QStringLiteral(
+        "QWidget#arrangeBar{background:#1a1e25;border-top:1px solid #242830;}"
+        "QPushButton{background:#252a35;border:1px solid #2e343f;border-radius:5px;"
+        "padding:6px 14px;color:#d6dae1;font-size:13px;}"
+        "QPushButton:hover{background:#2c333f;}"
+        "QPushButton:checked{background:#0a84ff;border-color:#0a84ff;color:white;}"));
+    auto* tb = new QHBoxLayout(m_arrangeBar);
+    tb->setContentsMargins(16, 8, 16, 8);
+    tb->setSpacing(10);
+
+    m_equalBtn = new QPushButton(QStringLiteral("等宽"), m_arrangeBar);
+    m_equalBtn->setCheckable(true);
+    m_equalBtn->setChecked(true);
+    m_masterBtn = new QPushButton(QStringLiteral("左侧主窗口 60:40"), m_arrangeBar);
+    m_masterBtn->setCheckable(true);
+    tb->addWidget(m_equalBtn);
+    tb->addWidget(m_masterBtn);
+    tb->addStretch(1);
+
+    m_arrangeBtn = new QPushButton(QStringLiteral("确认排列"), m_arrangeBar);
+    m_arrangeBtn->setStyleSheet(QStringLiteral(
+        "QPushButton{background:#0a84ff;border:none;border-radius:5px;"
+        "padding:6px 18px;color:white;font-size:13px;font-weight:bold;}"
+        "QPushButton:hover{background:#0974d8;}"));
+    tb->addWidget(m_arrangeBtn);
+
+    outer->addWidget(m_arrangeBar);
+    m_arrangeBar->setVisible(false);  // 选了两个窗口才显示
+
     // ---- 状态：浮在画面左下角，不占布局 ----
     m_statusLabel = new QLabel(this);
     m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
     m_statusLabel->setWordWrap(false);
 
-    // 应用内快捷键。Enter 不单独注册：点击已经能换画面，
-    // 定位统一走 Ctrl+Enter，免得和卡片栏的键盘操作抢同一个键。
+    // 应用内快捷键（M5）：Ctrl+R 刷新、Enter 定位单选、Ctrl+Enter 确认两窗排列。
     new QShortcut(QKeySequence(QStringLiteral("Ctrl+R")), this, [this] { onRefresh(); });
-    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), this, [this] { onActivate(); });
-    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Enter), this, [this] { onActivate(); });
+    new QShortcut(QKeySequence(QStringLiteral("Return")), this, [this] { onActivate(); });
+    new QShortcut(QKeySequence(QStringLiteral("Enter")), this, [this] { onActivate(); });
+    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), this, [this] { onArrange(); });
+    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Enter), this, [this] { onArrange(); });
 }
 
 void MainWindow::connectService() {
@@ -209,6 +255,21 @@ void MainWindow::connectService() {
         }
         openTaskView();
     });
+
+    // M3：排列模式切换 + 确认排列
+    connect(m_equalBtn, &QPushButton::clicked, this, [this] {
+        m_layoutMode = LayoutMode::Equal;
+        m_equalBtn->setChecked(true);
+        m_masterBtn->setChecked(false);
+        showSelection(false);
+    });
+    connect(m_masterBtn, &QPushButton::clicked, this, [this] {
+        m_layoutMode = LayoutMode::LeftMaster;
+        m_masterBtn->setChecked(true);
+        m_equalBtn->setChecked(false);
+        showSelection(false);
+    });
+    connect(m_arrangeBtn, &QPushButton::clicked, this, &MainWindow::onArrange);
 }
 
 void MainWindow::setAllowHide(bool allow) {
@@ -237,8 +298,15 @@ void MainWindow::applyWindows() {
         m_selected = 0;
     }
 
-    m_cards->setWindows(m_windows);
+    // 第二选中的窗口被关掉了：清掉，不然排列时找不到它
+    if (m_secondSelected != 0 && findWindow(m_secondSelected) == nullptr) {
+        m_secondSelected = 0;
+    }
+
+    m_cards->setWindows(m_windows.mid(0, kLeftMaxCards));
     m_cards->setSelected(m_selected);
+    m_cards->setSecondarySelected(m_secondSelected);
+    updateArrangeToolbar();
     // 刷新时画面内容没换人，别再淡入一次，否则 Ctrl+R 会闪一下。
     showSelected(needsSelection);
 
@@ -249,19 +317,43 @@ void MainWindow::applyWindows() {
 }
 
 void MainWindow::showSelected(bool animate) {
-    const WindowItem* window = findWindow(m_selected);
-    if (!window) {
-        m_canvas->clear();
-        return;
+    showSelection(animate);
+}
+
+// 选中变化后刷新右侧画面：选了两个 → 排列预览；选了一个 → 单窗放大。
+void MainWindow::showSelection(bool animate) {
+    if (m_selected != 0 && m_secondSelected != 0) {
+        // 两个窗口：用 computeLayout 算左右位置，右侧画排列预览。
+        const WindowItem* a = findWindow(m_selected);
+        const WindowItem* b = findWindow(m_secondSelected);
+        if (a && b) {
+            const QRect area = m_service->workArea();
+            QVector<QRect> out;
+            QString err;
+            if (computeLayout(area, 2, m_layoutMode, kPaneGap, out, &err) && out.size() >= 2) {
+                QVector<Placement> placements;
+                placements.push_back({m_selected, out[0]});
+                placements.push_back({m_secondSelected, out[1]});
+                m_canvas->showArrangement(area, placements, m_windows);
+            } else {
+                setStatus(err.isEmpty() ? QStringLiteral("排列空间不足。") : err, true);
+            }
+        }
+    } else {
+        const WindowItem* window = findWindow(m_selected);
+        if (!window) {
+            m_canvas->clear();
+            return;
+        }
+        m_canvas->showSingle(m_service->workArea(), *window);
     }
-    m_canvas->showSingle(m_service->workArea(), *window);
 
     if (!animate) {
         m_sceneEffect->setOpacity(1.0);
         return;
     }
 
-    // 换窗口时让画面轻轻淡进去：不然一整块内容瞬间替换，像闪了一下。
+    // 换画面时轻轻淡进去：不然一整块内容瞬间替换，像闪了一下。
     m_sceneEffect->setOpacity(0.25);
     auto* fade = new QPropertyAnimation(m_sceneEffect, "opacity", this);
     fade->setDuration(150);
@@ -272,12 +364,35 @@ void MainWindow::showSelected(bool animate) {
 }
 
 void MainWindow::onCardClicked(WindowId id) {
-    if (id == 0 || id == m_selected) {
+    if (id == 0) {
+        return;
+    }
+    // Ctrl+点击：选/取消第二个窗口（两窗排列）
+    if (QGuiApplication::queryKeyboardModifiers() & Qt::ControlModifier) {
+        if (id == m_selected) {
+            setStatus(QStringLiteral("第二个窗口不能和第一个相同。"), true);
+            return;
+        }
+        if (id == m_secondSelected) {
+            m_secondSelected = 0;  // 再点一次取消
+        } else {
+            m_secondSelected = id;
+        }
+        m_cards->setSecondarySelected(m_secondSelected);
+        showSelection();
+        updateArrangeToolbar();
+        return;
+    }
+    // 普通点击：单选，清掉第二选中
+    if (id == m_selected) {
         return;
     }
     m_selected = id;
+    m_secondSelected = 0;
     m_cards->setSelected(id);
-    showSelected();
+    m_cards->setSecondarySelected(0);
+    showSelection();
+    updateArrangeToolbar();
 }
 
 void MainWindow::onCardActivated(WindowId id) {
@@ -293,6 +408,30 @@ void MainWindow::onActivate() {
         return;
     }
     m_service->activateWindow(m_selected);
+}
+
+// M3：确认两窗左右排列。用 computeLayout 算位置，逐窗 placeWindow。
+void MainWindow::onArrange() {
+    if (m_selected == 0 || m_secondSelected == 0) {
+        setStatus(QStringLiteral("先选两个窗口（Ctrl+点第二个），再排列。"), true);
+        return;
+    }
+    const QRect area = m_service->workArea();
+    QVector<QRect> out;
+    QString err;
+    if (!computeLayout(area, 2, m_layoutMode, kPaneGap, out, &err) || out.size() < 2) {
+        setStatus(err.isEmpty() ? QStringLiteral("排列空间不足。") : err, true);
+        return;
+    }
+    // 逐窗移动：先左后右。结果由 operationFinished 逐窗报告。
+    m_service->placeWindow(m_selected, out[0]);
+    m_service->placeWindow(m_secondSelected, out[1]);
+    setStatus(QStringLiteral("已发送排列请求。"));
+}
+
+void MainWindow::updateArrangeToolbar() {
+    const bool show = (m_selected != 0 && m_secondSelected != 0);
+    m_arrangeBar->setVisible(show);
 }
 
 void MainWindow::onRefresh() {

@@ -24,6 +24,8 @@ public:
     void setWindow(const WindowItem& window);
     void setSelected(bool on);
     bool isSelected() const { return m_selected; }
+    // 第二选中（两窗排列时用）：画浅蓝边框 + 左上角"2"角标，和主选中区分。
+    void setSecondary(bool on);
 
     // 叠影时上面那张会压住这张的顶部，画一道内阴影让层次看得出来。
     // coverEdge 是"上一张的下边缘在哪"（卡片内部坐标）：阴影从这条线往下压，
@@ -56,6 +58,7 @@ private:
     QString m_process;
     QPixmap m_preview;
     bool m_selected = false;
+    bool m_secondary = false;  // 第二选中（两窗排列）
     bool m_overlapped = false;
     bool m_compact = false;
     int m_coverEdge = 0;
@@ -79,7 +82,9 @@ public:
 
     void setWindows(const QVector<WindowItem>& windows);
     void setSelected(WindowId id);
+    void setSecondarySelected(WindowId id);  // 两窗排列：第二选中
     WindowId selected() const { return m_selected; }
+    WindowId secondarySelected() const { return m_secondary; }
 
     int cardCount() const { return m_cards.size(); }
     // 超过四张：改成一列带标题的叠影。
@@ -88,8 +93,8 @@ public:
     int shadowLayers() const { return m_shadowLayers; }
     // 影子往右下错开的总量：卡片右边、下边各要为它留出这么宽。
     int shadowSpan() const;
-    // 鼠标是否正压在外露的那条影子上（第一张已经提起来了）。
-    bool isLifted() const { return m_hoverEdge; }
+    // 鼠标是否正压在卡片或影子上（有东西被提起）。
+    bool isLifted() const { return m_hoveredCard >= 0 || m_hoveredShadowCard >= 0; }
     // 相邻两张的间距（叠影时就是每张露出来的那一条有多高）。
     int stackedStep() const { return m_step; }
     // 每深一张往右错开多少像素（斜着叠的那个斜度）。
@@ -133,6 +138,7 @@ private:
     QVector<WindowCard*> m_cards;
     QVector<WindowItem> m_windows;  // 与 m_cards 同序
     WindowId m_selected = 0;
+    WindowId m_secondary = 0;  // 第二选中（两窗排列）
     bool m_stacked = false;
     bool m_compact = false;
     int m_step = 0;

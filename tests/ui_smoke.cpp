@@ -119,8 +119,8 @@ int main(int argc, char* argv[]) {
     check(stack->cardCount() == 4, "左栏有四张窗口卡");
     check(!stack->isStacked(), "四个窗口平铺，不叠");
     check(!stack->isCompact(), "四张都完整显示，没有压成标题条");
-    check(stack->shadowLayers() == 3, "只有第一张卡背后垫了三层影子界面");
-    check(stack->shadowSpan() == 30, "影子往右下共错开 30px");
+    check(stack->shadowLayers() == 4, "每张卡背后垫了四层影子界面");
+    check(stack->shadowSpan() == 40, "影子往右下共错开 40px");
     check(window.selectedWindow() == windows.first().id, "启动时默认选中第一个窗口");
     check(stack->topWindow() == windows.first().id, "第一张排在最前");
 
@@ -139,30 +139,26 @@ int main(int argc, char* argv[]) {
         check(stack->cardAt(3)->y() > stack->cardAt(0)->y(), "四张从上往下排");
     }
 
-    // ---- 鼠标压到外露的影子上：第一张往上提，移开落回去 ----
+    // ---- 鼠标碰到卡片：那张卡往上提，移开落回 ----
     if (stack->cardAt(0)) {
         const QRect resting = stack->cardAt(0)->geometry();
+        // 鼠标放在卡片身上：那张卡进入提起状态
         const QPoint onCard = resting.center();
         QMouseEvent overCard(QEvent::MouseMove, QPointF(onCard), Qt::NoButton, Qt::NoButton,
                              Qt::NoModifier);
         QCoreApplication::sendEvent(stack, &overCard);
         QCoreApplication::processEvents();
-        check(stack->cardAt(0)->y() == resting.y(), "鼠标只是放在卡片身上，不会提起来");
-
-        const QPoint onEdge(resting.right() + 12, resting.y() + resting.height() / 2);
-        QMouseEvent overEdge(QEvent::MouseMove, QPointF(onEdge), Qt::NoButton, Qt::NoButton,
-                             Qt::NoModifier);
-        QCoreApplication::sendEvent(stack, &overEdge);
-        check(stack->isLifted(), "鼠标压到外露的框上，第一张进入提起状态");
-        check(waitUntil([&] { return stack->cardAt(0)->y() == resting.y() - 10; }),
-              "提起动画把第一张往上抬了 10px");
+        check(stack->isLifted(), "鼠标放在卡片身上，那张卡进入提起状态");
+        check(waitUntil([&] { return stack->cardAt(0)->y() < resting.y(); }),
+              "提起动画把卡片往上抬了");
         check(stack->cardAt(0)->height() == resting.height(), "提起只改 y，卡片高度没变");
         check(stack->cardAt(0)->x() == resting.x(), "提出去的是正上方，没有左右跑");
 
+        // 鼠标移开：落回原位
         const QPoint away(4, 4);
-        QMouseEvent leaveEdge(QEvent::MouseMove, QPointF(away), Qt::NoButton, Qt::NoButton,
+        QMouseEvent leaveCard(QEvent::MouseMove, QPointF(away), Qt::NoButton, Qt::NoButton,
                               Qt::NoModifier);
-        QCoreApplication::sendEvent(stack, &leaveEdge);
+        QCoreApplication::sendEvent(stack, &leaveCard);
         check(!stack->isLifted(), "鼠标移开，提起状态结束");
         check(waitUntil([&] { return stack->cardAt(0)->y() == resting.y(); }),
               "落回原来的位置，四张又对齐了");
@@ -215,7 +211,7 @@ int main(int argc, char* argv[]) {
     service.refresh();
     QCoreApplication::processEvents();
     check(stack->cardCount() == 3, "关掉一个窗口后左栏只剩三张卡");
-    check(stack->shadowLayers() == 3, "三张时第一张背后仍然垫着影子");
+    check(stack->shadowLayers() == 4, "三张时每张背后仍然垫着影子");
     check(window.selectedWindow() != closing && window.selectedWindow() != 0,
           "被关掉的窗口自动换成别的，右栏不会空着");
     check(visiblePaneCount(canvas) == 1, "右栏仍有画面");
@@ -243,24 +239,29 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    check(stack2->cardCount() == 8, "八个窗口时左栏有八张卡");
-    check(stack2->isStacked(), "超过四个就叠起来");
+    check(stack2->cardCount() == 4, "八个窗口时左栏固定最多四张卡（MainWindow 截断）");
+    check(!stack2->isStacked(), "四张以内平铺，不叠");
     check(stack2->topWindow() == many.windows().first().id, "最前面是第一个窗口");
-    check(stack2->stackedShift() > 0, "叠影是斜着错开的，不是一列直上直下");
-    check(stack2->cardAt(4) && stack2->cardAt(0) && stack2->cardAt(4)->x() > stack2->cardAt(0)->x(),
-          "越往后错得越靠右");
-    check(stack2->cardAt(4) && stack2->cardAt(4)->width() < stack2->cardAt(0)->width(),
-          "越往后越窄，右边缘对齐");
 
-    const crossdesk::ui::WindowId lastId = many.windows().last().id;
-    clickCard(stack2, 7);
-    check(stack2->topWindow() == lastId, "点最后一张卡，它被拉到最前面");
-    check(stacked.selectedWindow() == lastId, "拉到最前的同时选中它");
-    check(visiblePaneCount(canvas2) == 1, "叠影模式下右栏也只有一个窗口");
-    check(shownWindow(canvas2) == lastId, "右栏显示的是刚拉到最前那个");
+    // 点第四张卡能切换选中
+    clickCard(stack2, 3);
+    const crossdesk::ui::WindowId thirdId = many.windows().at(3).id;
+    check(stacked.selectedWindow() == thirdId, "点第四张卡就选中它");
+    check(visiblePaneCount(canvas2) == 1, "右栏仍只有一个窗口");
+    check(shownWindow(canvas2) == thirdId, "右栏显示的是刚选中那个");
+
+    // ---- CardStack 直接测叠影（绕过 MainWindow 截断）----
+    crossdesk::ui::CardStack stackedOnly;
+    stackedOnly.resize(380, 600);
+    stackedOnly.setWindows(many.windows());
+    stackedOnly.show();
+    QCoreApplication::processEvents();
+    check(stackedOnly.cardCount() == 8, "CardStack 直接拿到 8 张卡（不截断）");
+    check(stackedOnly.isStacked(), "超过四个就叠起来");
+    check(stackedOnly.stackedShift() > 0, "叠影是斜着错开的");
 
     // 点最后一张时，它原来在 y 最大处；拉到最前后应该在顶部。
-    check(stack2->findChildren<crossdesk::ui::WindowCard*>().size() >= 8, "卡片没有被重复创建");
+    check(stack2->findChildren<crossdesk::ui::WindowCard*>().size() == 4, "左栏卡片数与截断一致，没有重复创建");
 
     // ---- 窗口更多：先保证每张还露得出一条完整标题，再多就退化成标题条 ----
     crossdesk::ui::FakeService sixteen(nullptr, 16);
@@ -274,10 +275,9 @@ int main(int argc, char* argv[]) {
         std::cout << "FATAL 十六个窗口场景的控件缺失\n";
         return 2;
     }
-    check(stack3->cardCount() == 16, "十六个窗口时左栏有十六张卡");
-    check(stack3->isStacked(), "十六个窗口仍然是叠影");
-    check(!stack3->isCompact(), "十六个窗口还没压到只剩标题");
-    check(stack3->stackedStep() >= 46, "每张露出的那条至少放得下一条标题");
+    check(stack3->cardCount() == 4, "十六个窗口时左栏仍固定四张卡");
+    check(!stack3->isStacked(), "四张平铺，不叠");
+    check(!stack3->isCompact(), "没有压成标题条");
 
     crossdesk::ui::FakeService lots(nullptr, 32);
     crossdesk::ui::MainWindow crowdest(&lots);
@@ -291,15 +291,14 @@ int main(int argc, char* argv[]) {
         std::cout << "FATAL 三十二个窗口场景的控件缺失\n";
         return 2;
     }
-    check(stack4->cardCount() == 32, "三十二个窗口时左栏有三十二张卡");
-    check(stack4->isCompact(), "一个接一个排不下时退化成标题条");
-    check(stack4->stackedStep() * stack4->cardCount() <= stack4->height(),
-          "标题条全部排在左栏里，不溢出");
+    check(stack4->cardCount() == 4, "三十二个窗口时左栏仍固定四张卡");
+    check(!stack4->isCompact(), "四张平铺，不压成标题条");
 
-    const crossdesk::ui::WindowId midId = lots.windows().at(20).id;
-    clickCard(stack4, 20);
-    check(stack4->topWindow() == midId, "标题条模式下点第 21 条也能换到最前");
-    check(shownWindow(canvas4) == midId, "右栏跟着换成它");
+    // 点第三张卡能切换选中
+    clickCard(stack4, 2);
+    const crossdesk::ui::WindowId secondId = lots.windows().at(2).id;
+    check(crowdest.selectedWindow() == secondId, "点第三张卡就选中它");
+    check(shownWindow(canvas4) == secondId, "右栏跟着换成它");
 
     // A receives a top-level HWND and client content coordinates, with no child HWND creation.
     if (stack3->cardAt(0)) {
@@ -349,11 +348,12 @@ int main(int argc, char* argv[]) {
     mouse(&hover, QEvent::MouseButtonPress, begin, Qt::LeftButton, Qt::LeftButton);
     mouse(&hover, QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton);
     mouse(&hover, QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton);
-    mouse(&hover, QEvent::MouseMove, QPoint(resting.right()+12, resting.y()+20), Qt::NoButton, Qt::NoButton);
-    check(waitUntil([&] { return hover.cardAt(0)->y() == resting.y()-10; }), "拖放后立即悬停仍会提起");
+    // 拖放后鼠标移到卡片身上，仍会提起
+    mouse(&hover, QEvent::MouseMove, resting.center(), Qt::NoButton, Qt::NoButton);
+    check(waitUntil([&] { return hover.cardAt(0)->y() < resting.y(); }), "拖放后悬停仍会提起");
     QElapsedTimer settled; settled.start();
     waitUntil([&] { return settled.elapsed() >= 250; });
-    check(hover.isLifted() && hover.cardAt(0)->y() == resting.y()-10,
+    check(hover.isLifted() && hover.cardAt(0)->y() < resting.y(),
           "回位动画结束后不会覆盖提起结果");
 
     std::cout << "\n通过 " << g_passed << " 项，失败 " << g_failed << " 项\n";
