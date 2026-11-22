@@ -3,6 +3,8 @@
 #include "crossdesk_service.h"
 
 #include <QObject>
+#include <QHash>
+#include <QPixmap>
 #include <QVector>
 
 namespace crossdesk::ui {
@@ -20,6 +22,7 @@ public:
 
     QVector<WindowItem> windows() const override;
     QRect workArea() const override;
+    QPixmap windowPreview(WindowId window) const override;
 
     void refresh() override;
     void activateWindow(WindowId window) override;
@@ -33,6 +36,8 @@ private:
     QVector<WindowItem> m_windows;
     QRect m_workArea;
     int m_windowCount = 4;
+    // 每个窗口对应的程序化预览图：构造时一次性生成，刷新/重置时也重建。
+    QHash<WindowId, QPixmap> m_previews;
 };
 
 }  // namespace crossdesk::ui

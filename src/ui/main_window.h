@@ -4,6 +4,7 @@
 #include "window_item.h"
 
 #include <QHash>
+#include <QPixmap>
 #include <QVector>
 #include <QWidget>
 
@@ -53,7 +54,10 @@ private:
     void onRefresh();
     void onActivate();
     void onArrange();  // M3：确认两窗左右排列
-    void openTaskView();  // 右键窗口：全屏展开子窗口（背景模糊）
+    // 右键窗口：展开该格子堆叠的所有项目（全屏、模糊背景）。
+    // stack 是该格子里从最前到最里的所有窗口（最多 4 层）。
+    // previews 是这些窗口对应的预览画面（假数据模式由 FakeService 生成）。
+    void openTaskView(const QVector<WindowItem>& stack, const QHash<WindowId, QPixmap>& previews);
 
     void showSelection(bool animate = true);  // 选中变化后刷新右侧画面
 

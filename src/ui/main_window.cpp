@@ -21,6 +21,8 @@
 #include <QTimer>
 #include <QWidget>
 
+#include <functional>
+
 namespace crossdesk::ui {
 
 namespace {
@@ -37,8 +39,12 @@ constexpr int kLeftMaxCards = 4;
 // ---- Task View：右键窗口后全屏展开子窗口，背景模糊，不分左右 ----
 class TaskView : public QWidget {
 public:
-    TaskView(QWidget* host, const QVector<WindowItem>& wins, WindowId selected)
-        : QWidget(host), m_selected(selected) {
+    // stack：该格子堆叠的所有窗口（最多 4 层），从最前到最里。
+    // previews：每个窗口对应的预览画面（假数据模式由 FakeService 生成，真实模式可空）。
+    TaskView(QWidget* host, const QVector<WindowItem>& stack, WindowId selected,
+             const QHash<WindowId, QPixmap>& previews,
+             std::function<void(WindowId)> onPick)
+        : QWidget(host), m_selected(selected), m_previews(previews), m_onPick(std::move(onPick)) {
         setAttribute(Qt::WA_DeleteOnClose);
         setAttribute(Qt::WA_QuitOnClose, false);
         setGeometry(host->rect());
@@ -53,7 +59,8 @@ public:
         tmp->setGraphicsEffect(blur);
         m_blurred = tmp->grab();
         delete tmp;
-        m_wins = wins.mid(0, 4);  // 最多 4 个子窗口
+        // 该格子的所有层（最多 4），不再取全局前 4。
+        m_wins = stack.mid(0, 4);
         show();
         setFocus();
         raise();
@@ -67,8 +74,8 @@ protected:
 
         const int n = m_wins.size();
         if (n == 0) return;
-        const int cw = qBound(180, (width() - 60) / n - 22, 300);
-        const int ch = qBound(120, height() - 140, 190);
+        const int cw = qBound(220, (width() - 60) / n - 22, 360);
+        const int ch = qBound(160, height() - 160, 240);
         const int gap = 22;
         const int total = n * cw + (n - 1) * gap;
         int x = (width() - total) / 2;
@@ -83,12 +90,21 @@ protected:
         hf.setPixelSize(12);
         p.setFont(hf);
         p.drawText(QRect(0, height() - 44, width(), 30), Qt::AlignCenter,
-                   QStringLiteral("右键展开子窗口 · 点空白或按 Esc 返回"));
+                   QStringLiteral("单击子窗口切换 · 点空白或按 Esc 返回"));
     }
     void mousePressEvent(QMouseEvent* e) override {
         if (e->button() != Qt::LeftButton) {
             QWidget::mousePressEvent(e);
             return;
+        }
+        // 点中某个子窗口卡片：切换选中（回调 MainWindow）后关闭；点空白：只关闭。
+        const QPoint pos = e->pos();
+        for (int i = 0; i < m_wins.size(); ++i) {
+            if (m_rects[i].contains(pos)) {
+                if (m_onPick) m_onPick(m_wins[i].id);
+                close();
+                return;
+            }
         }
         close();
     }
@@ -104,18 +120,25 @@ private:
         p.setBrush(QColor(0x1b, 0x1e, 0x25));
         p.setPen(QPen(sel ? QColor(0x0a, 0x84, 0xff) : QColor(255, 255, 255, 20), sel ? 2 : 1));
         p.drawRoundedRect(r, 10, 10);
+        // 画面区：有预览图就画预览，没有就画占位。
         const QRect screen(r.x(), r.y(), r.width(), r.height() - 34);
         p.save();
         p.setClipRect(screen);
-        p.fillRect(screen, QColor(0x15, 0x18, 0x1e));
-        p.fillRect(QRect(screen.x(), screen.y(), screen.width(), 20), QColor(0x2b, 0x30, 0x3a));
-        qreal ly = screen.y() + 32;
-        for (int i = 0; i < 3 && ly + 6 < screen.bottom(); ++i) {
-            p.setBrush(QColor(255, 255, 255, 14));
-            p.setPen(Qt::NoPen);
-            p.drawRoundedRect(QRectF(screen.x() + 14, ly,
-                                     (screen.width() - 28) * (i == 2 ? 0.55 : 0.9), 4), 2, 2);
-            ly += 16;
+        const QPixmap pv = m_previews.value(w.id);
+        if (!pv.isNull()) {
+            const QPixmap scaled = pv.scaled(screen.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            p.drawPixmap(screen.topLeft(), scaled);
+        } else {
+            p.fillRect(screen, QColor(0x15, 0x18, 0x1e));
+            p.fillRect(QRect(screen.x(), screen.y(), screen.width(), 20), QColor(0x2b, 0x30, 0x3a));
+            qreal ly = screen.y() + 32;
+            for (int i = 0; i < 3 && ly + 6 < screen.bottom(); ++i) {
+                p.setBrush(QColor(255, 255, 255, 14));
+                p.setPen(Qt::NoPen);
+                p.drawRoundedRect(QRectF(screen.x() + 14, ly,
+                                         (screen.width() - 28) * (i == 2 ? 0.55 : 0.9), 4), 2, 2);
+                ly += 16;
+            }
         }
         p.restore();
         const QRect tb(r.x(), r.y() + r.height() - 34, r.width(), 34);
@@ -131,7 +154,9 @@ private:
     QVector<WindowItem> m_wins;
     WindowId m_selected = 0;
     QPixmap m_blurred;
+    QHash<WindowId, QPixmap> m_previews;
     QRect m_rects[4];
+    std::function<void(WindowId)> m_onPick;
 };
 
 }  // namespace
@@ -144,7 +169,7 @@ MainWindow::MainWindow(CrossDeskService* service, QWidget* parent)
     applyWindows();
     m_service->refresh();
     if (!m_statusTakenByRefresh) {
-        setStatus(QStringLiteral("点左边的窗口，右边就显示它。双击可以把窗口切到前台。"));
+        setStatus(QStringLiteral("点左边的窗口，右边就显示它。右键展开子窗口。"));
     }
 }
 
@@ -247,13 +272,33 @@ void MainWindow::connectService() {
             });
 
     connect(m_cards, &CardStack::windowClicked, this, &MainWindow::onCardClicked);
-    connect(m_cards, &CardStack::windowActivated, this, &MainWindow::onCardActivated);
+    // 双击不再触发任何特殊行为（Task View 改由右键触发）。
     connect(m_cards, &CardStack::windowContextMenu, this, [this](WindowId id) {
         if (id != 0) {
             m_selected = id;
             m_cards->setSelected(id);
         }
-        openTaskView();
+        // 右键哪个格子，就展开该格子堆叠的所有项目（不是全局前 4 个）。
+        // 格子号 = index % slotCount；同格子的窗口每隔 slotCount 取一个。
+        const int slotCount = qMin(m_windows.size(), 4);
+        int idx = -1;
+        for (int i = 0; i < m_windows.size(); ++i) {
+            if (m_windows.at(i).id == id) { idx = i; break; }
+        }
+        QVector<WindowItem> stack;
+        if (idx >= 0 && slotCount > 0) {
+            const int g = idx % slotCount;
+            for (int i = g; i < m_windows.size(); i += slotCount) {
+                stack.push_back(m_windows.at(i));
+            }
+        }
+        // 顺带把这些窗口的预览图一起喂给 Task View，子窗口才有真实画面。
+        QHash<WindowId, QPixmap> previews;
+        for (const auto& w : stack) {
+            const QPixmap pv = m_service->windowPreview(w.id);
+            if (!pv.isNull()) previews.insert(w.id, pv);
+        }
+        openTaskView(stack, previews);
     });
 
     // M3：排列模式切换 + 确认排列
@@ -303,9 +348,17 @@ void MainWindow::applyWindows() {
         m_secondSelected = 0;
     }
 
-    m_cards->setWindows(m_windows.mid(0, kLeftMaxCards));
+    m_cards->setWindows(m_windows);
     m_cards->setSelected(m_selected);
     m_cards->setSecondarySelected(m_secondSelected);
+    // 给每张卡喂预览画面：真实模式由 A 的 DWM 缩略图注入（M6），假数据模式由
+    // FakeService::windowPreview 程序化生成。没喂的话卡片只剩占位条，像空格子。
+    for (int i = 0; i < m_cards->cardCount(); ++i) {
+        crossdesk::ui::WindowCard* card = m_cards->cardAt(i);
+        if (card) {
+            card->setPreview(m_service->windowPreview(card->windowId()));
+        }
+    }
     updateArrangeToolbar();
     // 刷新时画面内容没换人，别再淡入一次，否则 Ctrl+R 会闪一下。
     showSelected(needsSelection);
@@ -442,9 +495,14 @@ void MainWindow::onRefresh() {
     }
 }
 
-void MainWindow::openTaskView() {
-    // 右键展开 Task View：全屏、模糊背景、最多 4 个子窗口铺开。
-    new TaskView(this, m_windows, m_selected);
+void MainWindow::openTaskView(const QVector<WindowItem>& stack, const QHash<WindowId, QPixmap>& previews) {
+    // 右键展开 Task View：全屏、模糊背景、该格子堆叠的所有项目铺开（最多 4 层）。
+    // 单击子窗口：切换选中（回调）；点空白/Esc：关闭。
+    new TaskView(this, stack, m_selected, previews, [this](WindowId id) {
+        m_selected = id;
+        m_cards->setSelected(id);
+        showSelection();
+    });
 }
 
 void MainWindow::collapse() {

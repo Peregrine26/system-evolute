@@ -3,6 +3,7 @@
 #include "window_item.h"
 
 #include <QObject>
+#include <QPixmap>
 #include <QRect>
 #include <QVector>
 
@@ -29,6 +30,11 @@ public:
     virtual void refresh() = 0;
     virtual void activateWindow(WindowId window) = 0;
     virtual void placeWindow(WindowId window, const QRect& target) = 0;
+
+    // 该窗口的预览画面。真实模式下由 A 的 DWM 缩略图注入到卡片控件上，
+    // 这个方法返回空；假数据模式下由 FakeService 程序化绘制一张
+    // "看起来像这个应用"的图，免得卡片只剩占位条。
+    virtual QPixmap windowPreview(WindowId window) const { Q_UNUSED(window); return {}; }
 
 signals:
     void windowsChanged();
