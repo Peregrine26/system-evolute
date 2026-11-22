@@ -94,7 +94,7 @@ public:
     // 影子往右下错开的总量：卡片右边、下边各要为它留出这么宽。
     int shadowSpan() const;
     // 鼠标是否正压在卡片或影子上（有东西被提起）。
-    bool isLifted() const { return m_hoveredCard >= 0 || m_hoveredShadowCard >= 0; }
+    bool isLifted() const { return m_hoveredCard >= 0; }
     // 相邻两张的间距（叠影时就是每张露出来的那一条有多高）。
     int stackedStep() const { return m_step; }
     // 每深一张往右错开多少像素（斜着叠的那个斜度）。
@@ -127,9 +127,6 @@ private:
     int cardIndexAt(const QPoint& pos) const;
 
     // 外露的那条影子：鼠标压上去就把第一张提起来。
-    bool onShadowEdge(const QPoint& pos) const;
-    // 命中哪张卡的哪层影子（每层影子本身是个窗口，碰到就上提）。
-    bool shadowLayerAt(const QPoint& pos, int& card, int& layer) const;
     void updateHover(const QPoint& pos);
     void setLiftTarget(bool on);
     void applyLift();
@@ -143,20 +140,15 @@ private:
     bool m_compact = false;
     int m_step = 0;
     int m_shift = 0;
-    int m_shadowLayers = 0;
-    // 影子画在哪：第一张卡的"落位"，不是它当前的位置。
-    // 拖动时卡片跑开、影子留在原地，才看得出是从那一摞里抽出来的。
-    QRect m_shadowBase;
-    // 每张卡的落位（relayout 时记下）：悬停上提时从落位往上抬，影子按落位画不动。
+    int m_shadowLayers = 0;  // 装饰影子层数（恒 0：影子是真实卡片，不画装饰）
+    int m_span = 0;          // 同格内卡片往右下错开的总量 = (maxLayers-1)*kShadowStep
+    // 每张卡的落位（relayout 时记下）：悬停上提时从落位往上抬。
     QVector<QRect> m_restGeo;
     int m_hoveredCard = -1;  // 当前悬停的卡（-1 = 无）
-    int m_hoveredShadowCard = -1;  // 当前悬停的影子层所在卡（-1 = 无）
-    int m_hoveredShadowLayer = 0;  // 悬停的是第几层影子（1..kShadowLayers）
 
     // 提起程度 0..1，配一段 140ms 的补间：0 = 落位，1 = 抬起 kLiftHeight。
     qreal m_lift = 0.0;
     QVariantAnimation* m_liftAnim = nullptr;
-    bool m_hoverEdge = false;
 
     int m_pressIndex = -1;
     QPoint m_pressPos;

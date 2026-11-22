@@ -334,41 +334,8 @@ void CardStack::paintEvent(QPaintEvent*) {
     // 左栏自己一层底色，和右边的桌面画面分开，像任务栏挂在一块面板上。
     painter.fillRect(rect(), QColor(0x14, 0x17, 0x1c));
 
-    // ---- 每张卡背后的影子界面 ----
-    // 每张窗口卡都垫 kShadowLayers 层圆角板，每层往右下错开 10px：像一叠窗口压在
-    // 它下面，露出来的是右下那一圈。画在父控件上，子卡片盖住的部分自动看不见。
-    // 第一张的影子按"落位"(m_shadowBase)画：它被提起来时影子留在原地，才看得出"提"；
-    // 其余卡按各自几何画。
-    if (m_shadowLayers > 0 && !m_stacked) {
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        for (int c = 0; c < m_cards.size(); ++c) {
-            // 影子按"落位"画：卡片被悬停提起时影子留在原地，才看得出是"提"。
-            const QRect base = m_restGeo.value(c, m_cards.at(c)->geometry());
-            if (base.isNull() || base.width() <= 0 || base.height() <= 0) {
-                continue;
-            }
-            // 由远及近画：最远的最暗、也最靠右下，近的压在它上面。
-            // 第一张被提起来时整体提亮一点：离桌面远了，影子该淡一些。
-            const int liftTone = (c == m_hoveredCard) ? qRound(m_lift * 6) : 0;
-            for (int i = m_shadowLayers; i >= 1; --i) {
-                int xoff = i * kShadowStep;
-                int yoff = i * kShadowStep;
-                // 命中的那层影子本身是个窗口，碰到就往上提 8px（不浮到前面、不盖前面卡片）。
-                if (c == m_hoveredShadowCard && i == m_hoveredShadowLayer) {
-                    yoff -= 8;
-                }
-                QPainterPath layer;
-                layer.addRoundedRect(QRectF(base).translated(xoff, yoff), kCardRadius,
-                                     kCardRadius);
-                const int tone = 0x21 + (m_shadowLayers - i) * 7 + liftTone;
-                painter.fillPath(layer, QColor(tone, tone + 5, tone + 11));
-                painter.setBrush(Qt::NoBrush);
-                painter.setPen(QPen(QColor(255, 255, 255, 26), 1));
-                painter.drawPath(layer);
-            }
-        }
-    }
-
+    // 装饰影子不再画：同格内叠放的卡片是真实窗口（有预览内容），
+    // 露出的右下边自然形成层次，不需要额外画影子色块。
     painter.setPen(QColor(0x24, 0x28, 0x30));
     painter.drawLine(width() - 1, 0, width() - 1, height());
 }
@@ -404,17 +371,19 @@ void CardStack::mouseDoubleClickEvent(QMouseEvent* event) {
 }
 
 int CardStack::shadowSpan() const {
-    return m_shadowLayers > 0 ? kShadowSpan : 0;
+    return m_span;
 }
 
-// 右键窗口：发信号给主窗口，展开 Task View。
-// 每张卡的"本体 + 它背后的影子区域"都算这张卡，这样四张都能右键，不只第一张。
+// 右键窗口：发信号给主窗口，展开该格子堆叠的 Task View。
+// 每张卡的"本体 + 它背后同格卡片错开露出的区域"都算这张卡的格子。
+// 用 m_span（实际错开量）而不是 kShadowSpan（固定 40），避免 4 窗口无错开时
+// 命中区域往下扩 40px 侵入下一格，右键下一格上半部分误命中上一格。
 void CardStack::contextMenuEvent(QContextMenuEvent* event) {
     const QPoint pos = event->pos();
     int index = -1;
     for (int i = 0; i < m_cards.size(); ++i) {
         const QRect r = m_cards.at(i)->geometry();
-        if (r.contains(pos) || r.adjusted(0, 0, kShadowSpan, kShadowSpan).contains(pos)) {
+        if (r.contains(pos) || r.adjusted(0, 0, m_span, m_span).contains(pos)) {
             index = i;
             break;
         }
@@ -453,7 +422,7 @@ void CardStack::relayout(bool animated) {
     const int count = m_windows.size();
     if (count == 0) {
         m_shadowLayers = 0;
-        m_shadowBase = QRect();
+        m_span = 0;
         update();
         return;
     }
@@ -469,7 +438,7 @@ void CardStack::relayout(bool animated) {
     m_shift = 0;
     m_step = kShadowStep;
     m_shadowLayers = 0;   // 装饰影子不画了（影子是真实卡片，自己画内容）
-    m_shadowBase = QRect();
+    m_span = span;        // 同格内卡片往右下错开的总量
 
     const int inner = this->height() - kMargin * 2;
     const int full = this->width() - kMargin * 2;
@@ -528,65 +497,13 @@ int CardStack::cardIndexAt(const QPoint& pos) const {
 }
 
 // 外露的那条影子：第一张右边、影子还没有被卡片盖住的那一圈。
-// 上半截从第一层影子开始（再往上那 10px 是空的），下沿连到影子的最外一层——
-// 右下角那一段虽然在第二张旁边，但它也属于这一摞的边，一起算抓手。
-bool CardStack::onShadowEdge(const QPoint& pos) const {
-    if (m_stacked || m_shadowLayers <= 0 || m_shadowBase.isNull()) {
-        return false;
-    }
-    const QRect band(m_shadowBase.right() + 1, m_shadowBase.top() + kShadowStep, kShadowSpan,
-                     m_shadowBase.height() - kShadowStep + kShadowSpan);
-    return band.contains(pos);
-}
-
-// 命中哪张卡的哪层影子：影子从卡片右下错开露出，每层露出一圈。
-// 右侧条/下侧条各按露出量算出第几层（1..kShadowLayers）。
-bool CardStack::shadowLayerAt(const QPoint& pos, int& cardOut, int& layerOut) const {
-    if (m_shadowLayers <= 0 || m_stacked) {
-        return false;
-    }
-    for (int c = 0; c < m_cards.size(); ++c) {
-        const QRect base = m_restGeo.value(c, m_cards.at(c)->geometry());
-        if (base.isNull() || base.width() <= 0 || base.height() <= 0) {
-            continue;
-        }
-        const int dx = pos.x() - base.right();   // 右侧露出量
-        const int dy = pos.y() - base.bottom();  // 下侧露出量
-        // 必须落在右侧条或下侧条（不超出另一维太多），且在影子总跨度内。
-        const bool rightStrip = dx > 0 && dx <= kShadowSpan &&
-                                pos.y() >= base.top() && pos.y() <= base.bottom() + kShadowSpan;
-        const bool bottomStrip = dy > 0 && dy <= kShadowSpan &&
-                                 pos.x() >= base.left() && pos.x() <= base.right() + kShadowSpan;
-        if (!rightStrip && !bottomStrip) {
-            continue;
-        }
-        const int mx = qMax(dx, dy);
-        int layer = (mx + kShadowStep - 1) / kShadowStep;  // 向上取整 = 第几层
-        if (layer < 1) layer = 1;
-        if (layer > m_shadowLayers) layer = m_shadowLayers;
-        cardOut = c;
-        layerOut = layer;
-        return true;
-    }
-    return false;
-}
-
 void CardStack::updateHover(const QPoint& pos) {
     if (m_dragging) {
         return;
     }
-    // 先看是不是落在某层影子上（影子本身是窗口，碰到就上提，不算卡片悬停）。
-    int scard = -1, slayer = 0;
-    const bool onShadow = shadowLayerAt(pos, scard, slayer);
-    const int newShadowCard = onShadow ? scard : -1;
-    const int newShadowLayer = onShadow ? slayer : 0;
-    if (newShadowCard != m_hoveredShadowCard || newShadowLayer != m_hoveredShadowLayer) {
-        m_hoveredShadowCard = newShadowCard;
-        m_hoveredShadowLayer = newShadowLayer;
-        update();  // 影子提起要重画
-    }
-    // 卡片悬停（影子区域不算卡片）
-    const int h = onShadow ? -1 : cardIndexAt(pos);
+    // 悬停命中：同格内叠放的卡片是真实窗口，cardIndexAt 按 z 序（层 0 优先）
+    // 遍历，落在后面卡片露出的右下边时会命中后面那张，自然提起。
+    const int h = cardIndexAt(pos);
     if (h != m_hoveredCard) {
         m_hoveredCard = h;
         setLiftTarget(h >= 0);
@@ -641,8 +558,6 @@ void CardStack::clearLift() {
     }
     m_lift = 0.0;
     m_hoveredCard = -1;
-    m_hoveredShadowCard = -1;
-    m_hoveredShadowLayer = 0;
     // 落回各自落位，别让谁悬在半空。
     for (int i = 0; i < m_cards.size() && i < m_restGeo.size(); ++i) {
         if (m_cards.at(i)->geometry() != m_restGeo.at(i)) {
@@ -707,14 +622,9 @@ void CardStack::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void CardStack::leaveEvent(QEvent* event) {
-    // 鼠标离开整条栏：提起来的那张/那层影子都落回去。
+    // 鼠标离开整条栏：提起来的那张落回去。
     if (!m_dragging) {
         setLiftTarget(false);
-        if (m_hoveredShadowCard >= 0) {
-            m_hoveredShadowCard = -1;
-            m_hoveredShadowLayer = 0;
-            update();
-        }
     }
     QWidget::leaveEvent(event);
 }

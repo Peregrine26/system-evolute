@@ -33,7 +33,7 @@ constexpr int kBarMinWidth = 260;
 constexpr int kBarMaxWidth = 380;
 
 // 左栏固定最多显示这么多张卡：多余的窗口不占左栏位置（右键 Task View 才看到）。
-// CardStack 本身支持任意数量（叠影/压缩），截断在 MainWindow 这层做。
+// CardStack 做 4 格分组 + 同格内分层，支持任意数量窗口，不需要 MainWindow 截断。
 constexpr int kLeftMaxCards = 4;
 
 // ---- Task View：右键窗口后全屏展开子窗口，背景模糊，不分左右 ----
