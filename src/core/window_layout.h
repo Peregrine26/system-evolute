@@ -43,6 +43,7 @@ enum class LayoutError {
 
 struct LayoutResult {
     LayoutError error = LayoutError::None;
+    // UTF-8 text, shown to the user as-is
     std::string message;
     WindowBounds left;
     WindowBounds right;

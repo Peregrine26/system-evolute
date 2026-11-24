@@ -413,6 +413,7 @@ void scenario6_failed_query_still_silent() {
     // Root cause: A's scan_with_status() sets `complete` from the enumeration
     // return value only; a per-window query failure does not flip it.
     // See docs/b-core-integration.md §3 for the three-line fix on A's side.
+    // Tracking: #5 (bounds query failure must mark a window scan incomplete).
     //
     // When the fix lands (A marks the scan incomplete on per-window failure),
     // flip the assertions below and drop the KNOWN-BEHAVIOR macro:

@@ -121,7 +121,7 @@ result.complete = complete && enumerate_result;
 
 ## 5. 待三人确认
 
-1. 第 3 节那处 `complete` 语义（唯一影响结论正确性的一条）。
-2. `ScanSnapshot` 与 `WindowScanResult` 现在是一对同形结构。建议把 `WindowScanResult` 从 `windows_window_scanner.h` 挪到 `window_info.h`（它只是数据），B 就能删掉 `ScanSnapshot` 直接复用；现在保留的代价只是调用方多写一行转换。
+1. 第 3 节那处 `complete` 语义（唯一影响结论正确性的一条）。已由 [#5](https://github.com/Peregrine26/system-evolute/issues/5) 跟踪；A 修好后，翻转 `tests/pipeline_tests.cpp` 场景 6 的三处断言即可。
+2. `ScanSnapshot` 与 `WindowScanResult` 现在是一对同形结构。建议把 `WindowScanResult` 从 `windows_window_scanner.h` 挪到 `window_info.h`（它只是数据），B 就能删掉 `ScanSnapshot` 直接复用；现在保留的代价只是调用方多写一行转换。因涉及共享接口头，记为后续任务 [#9](https://github.com/Peregrine26/system-evolute/issues/9)，不在本 PR 内改。
 3. `WindowBounds` 是否加 `width()/height()` 成员。加了 B 可以删掉两个自由函数；不加也不影响结果。
 4. `crossdesk_core` 目前只有 B 的三个 .cpp。C 接入 Qt 时直接 `target_link_libraries(... crossdesk_core)` 即可，注意也要开 `/utf-8`，否则界面里的中文会乱码。
