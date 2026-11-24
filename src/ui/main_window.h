@@ -4,11 +4,13 @@
 #include "window_item.h"
 
 #include <QHash>
+#include <QPixmap>
 #include <QVector>
 #include <QWidget>
 
 class QGraphicsOpacityEffect;
 class QLabel;
+class QPushButton;
 class QShowEvent;
 
 namespace crossdesk::ui {
@@ -51,22 +53,38 @@ private:
     void onCardActivated(WindowId id);  // 双击 = 把真实窗口切到前台
     void onRefresh();
     void onActivate();
+    void onArrange();  // M3：确认两窗左右排列
+    // 右键窗口：展开该格子堆叠的所有项目（全屏、模糊背景）。
+    // stack 是该格子里从最前到最里的所有窗口（最多 4 层）。
+    // previews 是这些窗口对应的预览画面（假数据模式由 FakeService 生成）。
+    void openTaskView(const QVector<WindowItem>& stack, const QHash<WindowId, QPixmap>& previews);
+
+    void showSelection(bool animate = true);  // 选中变化后刷新右侧画面
 
     void showSelected(bool animate = true);
     void setStatus(const QString& text, bool error = false);
     void layoutStatus();
+    void updateArrangeToolbar();  // 按选中数量显示/隐藏排列工具条
 
     const WindowItem* findWindow(WindowId id) const;
 
     CrossDeskService* m_service = nullptr;
     QVector<WindowItem> m_windows;
     WindowId m_selected = 0;
+    WindowId m_secondSelected = 0;  // M3：Ctrl+点第二张卡选中，两窗排列
+    LayoutMode m_layoutMode = LayoutMode::Equal;  // 等宽 / 左侧主窗口 60:40
     QHash<WindowId, QString> m_failures;
 
     CardStack* m_cards = nullptr;
     LayoutPreview* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
     QGraphicsOpacityEffect* m_sceneEffect = nullptr;
+
+    // M3 排列工具条：选了两个窗口才显示
+    QWidget* m_arrangeBar = nullptr;
+    QPushButton* m_equalBtn = nullptr;
+    QPushButton* m_masterBtn = nullptr;
+    QPushButton* m_arrangeBtn = nullptr;
 
     bool m_allowHide = false;
     bool m_firstShow = true;
