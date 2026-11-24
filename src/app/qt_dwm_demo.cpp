@@ -49,12 +49,15 @@ int main(int argc, char** argv) {
     auto* status = new QLabel;
     auto* toggle = new QPushButton(QStringLiteral("Show / clear previews"));
     auto* preview_area = new QWidget;
+    auto* left_preview = new QWidget(preview_area);
+    auto* right_preview = new QWidget(preview_area);
     preview_area->setMinimumSize(300, 180);
     layout->addWidget(status);
     layout->addWidget(toggle);
     layout->addWidget(preview_area, 1);
     window.setCentralWidget(body);
-    window.show();
+    if (app.arguments().contains(QStringLiteral("--fullscreen"))) window.showFullScreen();
+    else window.show();
     crossdesk::QtDesktopBridge bridge(window);
     const auto key = bridge.register_hotkey();
     const QString key_text = key.ready() ? QStringLiteral("Ctrl+Alt+M ready")
@@ -63,13 +66,14 @@ int main(int argc, char** argv) {
     bool previews_ready = false;
     auto update = [&] {
         if (!expanded) { bridge.clear_previews(); status->setText(key_text); return; }
-        const QPoint origin = preview_area->mapTo(&window, QPoint(0, 0));
         const int half = preview_area->width() / 2;
-        const auto results = bridge.set_previews({
+        left_preview->setGeometry(0, 0, half - 6, preview_area->height());
+        right_preview->setGeometry(half + 6, 0, preview_area->width() - half - 6, preview_area->height());
+        const auto results = bridge.set_widget_previews({
             {static_cast<crossdesk::NativeWindowHandle>(first.winId()),
-             QRect(origin, QSize(half - 6, preview_area->height()))},
+             left_preview, left_preview->rect()},
             {static_cast<crossdesk::NativeWindowHandle>(second.winId()),
-             QRect(origin + QPoint(half + 6, 0), QSize(preview_area->width() - half - 6, preview_area->height()))}
+             right_preview, right_preview->rect()}
         });
         previews_ready = results[0].ready() && results[1].ready();
         status->setText(key_text + QStringLiteral(" | A: %1 | B: %2")

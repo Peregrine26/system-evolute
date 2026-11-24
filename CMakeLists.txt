@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(CROSSDESK_BUILD_GUI "Build the Qt desktop application" ON)
 option(CROSSDESK_BUILD_SCANNER "Build the Windows scanner example" ${WIN32})
+set(CROSSDESK_C_UI_SOURCE_DIR "" CACHE PATH "Optional unchanged C UI checkout for compatibility tests")
 include(CTest)
 
 if(CROSSDESK_BUILD_GUI)
@@ -98,6 +99,19 @@ if(WIN32 AND CROSSDESK_BUILD_GUI AND CROSSDESK_BUILD_SCANNER)
     add_executable(crossdesk_qt_dwm_demo src/app/qt_dwm_demo.cpp)
     target_link_libraries(crossdesk_qt_dwm_demo PRIVATE crossdesk_qt_platform)
     if(BUILD_TESTING)
+        add_executable(crossdesk_qt_preview_region_test tests/qt_preview_region_test.cpp)
+        target_link_libraries(crossdesk_qt_preview_region_test PRIVATE crossdesk_qt_platform)
+        add_test(NAME qt_preview_region_test COMMAND crossdesk_qt_preview_region_test)
+        add_test(NAME qt_preview_region_hidpi_test COMMAND crossdesk_qt_preview_region_test)
+        set_tests_properties(qt_preview_region_test PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
+        set_tests_properties(qt_preview_region_hidpi_test PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=1.5" TIMEOUT 15)
+        add_executable(crossdesk_qt_widget_previews_selftest tests/qt_widget_previews_selftest.cpp)
+        target_link_libraries(crossdesk_qt_widget_previews_selftest PRIVATE crossdesk_qt_platform)
+        add_test(NAME qt_widget_previews_selftest COMMAND crossdesk_qt_widget_previews_selftest)
+        set_tests_properties(qt_widget_previews_selftest PROPERTIES
+            LABELS "interactive-desktop" TIMEOUT 15)
         add_executable(crossdesk_qt_bridge_lifecycle_test tests/qt_bridge_lifecycle_test.cpp)
         target_link_libraries(crossdesk_qt_bridge_lifecycle_test PRIVATE crossdesk_qt_platform)
         target_compile_definitions(crossdesk_qt_bridge_lifecycle_test PRIVATE
@@ -108,5 +122,31 @@ if(WIN32 AND CROSSDESK_BUILD_GUI AND CROSSDESK_BUILD_SCANNER)
         add_test(NAME qt_dwm_smoke COMMAND crossdesk_qt_dwm_demo --smoke)
         set_tests_properties(qt_dwm_smoke PROPERTIES
             LABELS "interactive-desktop" TIMEOUT 15)
+        if(CROSSDESK_C_UI_SOURCE_DIR)
+            set(crossdesk_c_ui "${CROSSDESK_C_UI_SOURCE_DIR}/src/ui")
+            add_library(crossdesk_c_ui_fixture STATIC
+                "${crossdesk_c_ui}/main_window.cpp" "${crossdesk_c_ui}/main_window.h"
+                "${crossdesk_c_ui}/preview_widgets.cpp" "${crossdesk_c_ui}/preview_widgets.h"
+                "${crossdesk_c_ui}/window_cards.cpp" "${crossdesk_c_ui}/window_cards.h"
+                "${crossdesk_c_ui}/crossdesk_service.h")
+            set_target_properties(crossdesk_c_ui_fixture PROPERTIES AUTOMOC ON)
+            target_include_directories(crossdesk_c_ui_fixture PUBLIC "${CROSSDESK_C_UI_SOURCE_DIR}/src")
+            target_link_libraries(crossdesk_c_ui_fixture PUBLIC Qt6::Widgets)
+            if(MSVC)
+                target_compile_options(crossdesk_c_ui_fixture PRIVATE /utf-8)
+            endif()
+            add_executable(crossdesk_c_ui_bridge_selftest tests/c_ui_bridge_selftest.cpp)
+            # Prefer current A headers over the older A copy in C's checkout.
+            target_include_directories(crossdesk_c_ui_bridge_selftest BEFORE PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/src")
+            target_link_libraries(crossdesk_c_ui_bridge_selftest PRIVATE
+                crossdesk_c_ui_fixture crossdesk_qt_platform)
+            add_test(NAME c_ui_bridge_mapping_test COMMAND crossdesk_c_ui_bridge_selftest)
+            set_tests_properties(c_ui_bridge_mapping_test PROPERTIES
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
+            add_test(NAME c_ui_bridge_selftest COMMAND crossdesk_c_ui_bridge_selftest --desktop)
+            set_tests_properties(c_ui_bridge_selftest PROPERTIES
+                LABELS "interactive-desktop" TIMEOUT 15)
+        endif()
     endif()
 endif()
