@@ -2,26 +2,30 @@ name: Windows platform
 
 on:
   push:
+    branches: [main, c]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   platform:
     # Keep the runner compatible with the Visual Studio 2022 generator below.
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Configure without Qt
         run: cmake -S . -B build-platform -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=OFF
       - name: Build
         run: cmake --build build-platform --config Debug --parallel
-      - name: Test layout integration without desktop operations
-        run: ctest --test-dir build-platform -C Debug -R "^layout_executor_test$" --output-on-failure
+      - name: Test without desktop operations
+        run: ctest --test-dir build-platform -C Debug -LE interactive-desktop --output-on-failure --no-tests=error
 
   qt:
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Qt Widgets
         uses: jurplel/install-qt-action@v4
         with:

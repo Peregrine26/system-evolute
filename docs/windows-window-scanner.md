@@ -31,7 +31,11 @@ Process 是正在运行的程序实例。一个 Process 可以创建零个、一
 5. 扫描器通过适配器读取标题、PID、进程名、边界和可见状态。
 6. Win32 回调返回 `TRUE` 继续枚举，返回 `FALSE` 停止枚举。
 
-这里的“顶层窗口”是桌面窗口层级中的顶级窗口，不等于“所有可见窗口”。因此结果里可能包含不可见窗口、没有标题的窗口或系统窗口。第一版把 `visible` 也打印出来，不急着在扫描层过滤，方便观察真实系统数据。
+这里的“顶层窗口”不等于“所有可见应用窗口”。当前扫描器先调用适配器的
+`is_manageable_window`，由 Windows 后端排除壳层、cloaked 等来源；保留下来的
+候选仍可能不可见或没有标题，`visible` / `minimized` 供 B 的显示规则继续处理。
+不要按同一进程名把文件管理器或系统设置一并删除。规则与调用前提见
+[A 接口记录](a-platform-integration.md)。
 
 ## 3. API 适配器为什么单独存在
 
@@ -76,20 +80,9 @@ X11
 
 ## 5. 在 Windows 上构建
 
-需要：
-
-- Visual Studio 2022，并安装“使用 C++ 的桌面开发”
-- CMake 3.20 或更高版本
-
-在“Developer PowerShell for VS 2022”中运行：
-
-```powershell
-cmake -S . -B build-scanner -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=OFF
-cmake --build build-scanner --config Debug
-.\build-scanner\Debug\crossdesk_window_scanner.exe
-```
-
-也可以使用 Qt Creator 打开根目录中的 `CMakeLists.txt`，选择一个 Windows 编译器 Kit 后构建运行。
+使用[构建说明的 Windows 无 Qt 路径](getting-started.md#windows-无-qt)，
+依赖与命令统一在那里维护。也可以用 Qt Creator 打开根目录 `CMakeLists.txt`，
+选择匹配的 Windows 编译器 Kit 后构建运行。
 
 ## 6. 手工测试
 
@@ -101,4 +94,7 @@ cmake --build build-scanner --config Debug
 4. 移动或调整一个窗口大小后再次运行，`Bounds` 会发生变化。
 5. 最小化一个窗口后再次运行，观察 `Visible` 和边界信息。
 
-第一版不承诺窗口顺序稳定，也不把“哪些窗口应该出现在 Mission Control”作为本阶段问题。过滤规则会在后续 Workspace 和 UI 需求明确后再加入。
+扫描顺序不承诺稳定。调用方应使用 `scan_with_status()`，枚举不完整时不能根据
+缺席条目推断窗口关闭；`scan()` 仅保留诊断程序的旧接口。边界查询失败后的
+完整性仍有已登记的待修缺陷，见[仓库状态](repository-status.md)，不能把本段
+接口契约当作所有失败路径都已经实现的保证。
