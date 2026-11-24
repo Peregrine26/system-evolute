@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 #include <QThread>
 
+#include <cstddef>
 #include <iostream>
 
 namespace {
@@ -27,6 +28,53 @@ void pump(int milliseconds) {
         QApplication::processEvents();
         QThread::msleep(5);
     }
+}
+
+// The bridge rejects regions under a fading ancestor and reports
+// DesktopStatus::Unavailable until the fade ends. C animates its startup and
+// selection fades, so a single mapping right after a fixed delay is a race: a
+// loaded CI runner finishes the fade later than a developer machine. Wait for
+// a stable state within a bounded budget instead of guessing the duration.
+struct MappingOutcome {
+    std::vector<crossdesk::DesktopResult> results;
+    bool ready() const {
+        for (const auto& result : results) {
+            if (!result.ready()) return false;
+        }
+        return true;
+    }
+};
+
+MappingOutcome map_all_regions(const crossdesk::QtDesktopBridge& bridge,
+                               const std::vector<crossdesk::QtWidgetPreview>& requests,
+                               int timeout_ms) {
+    QElapsedTimer elapsed;
+    elapsed.start();
+    MappingOutcome outcome;
+    for (;;) {
+        outcome.results.clear();
+        for (const auto& request : requests) {
+            QRect mapped;
+            outcome.results.push_back(
+                bridge.map_preview_region(*request.widget, request.content, mapped));
+        }
+        if (outcome.ready() || elapsed.elapsed() >= timeout_ms) return outcome;
+        pump(5);
+    }
+}
+
+void report_mapping_failure(std::size_t index, const crossdesk::QtWidgetPreview& request,
+                            const crossdesk::DesktopResult& result) {
+    std::cerr << "C widget content mapping failed: region=" << index
+              << " status=" << int(result.status);
+    if (request.widget) {
+        std::cerr << " widget=" << request.widget->metaObject()->className()
+                  << ' ' << request.widget->width() << 'x' << request.widget->height()
+                  << " visible=" << request.widget->isVisible();
+    }
+    std::cerr << " content=" << request.content.x() << ',' << request.content.y()
+              << ' ' << request.content.width() << 'x' << request.content.height()
+              << '\n';
 }
 }
 
@@ -60,7 +108,11 @@ int main(int argc, char** argv) {
     pump(250);  // C's startup/selection fades must complete before DWM is shown.
     auto* cards = window.findChild<crossdesk::ui::CardStack*>(QStringLiteral("cardStack"));
     const auto panes = window.findChildren<crossdesk::ui::ThumbnailSlot*>();
-    if (!cards || cards->cardCount() != 2 || panes.isEmpty()) return 1;
+    if (!cards || cards->cardCount() != 2 || panes.isEmpty()) {
+        std::cerr << "C fixture layout changed: cards=" << (cards ? cards->cardCount() : -1)
+                  << " panes=" << panes.size() << '\n';
+        return 1;
+    }
     auto* card = cards->cardAt(0);
     const auto before = card->internalWinId();
     std::vector<crossdesk::QtWidgetPreview> requests;
@@ -77,14 +129,19 @@ int main(int argc, char** argv) {
                 pane->rect().adjusted(30, 50, -30, -70)});
         }
     }
-    bool ok = requests.size() == 3;
-    for (const auto& request : requests) {
-        QRect mapped;
-        const auto result = bridge.map_preview_region(*request.widget, request.content, mapped);
-        if (!result.ready()) {
-            std::cerr << "C widget content mapping failed: " << int(result.status) << '\n';
-            ok = false;
-        }
+    // Two cards plus C's currently selected pane. Update this expectation
+    // together with C's card count and default selection.
+    constexpr std::size_t kExpectedRegions = 3;
+    bool ok = requests.size() == kExpectedRegions;
+    if (!ok) {
+        std::cerr << "C region count mismatch: got " << requests.size()
+                  << " expected " << kExpectedRegions << '\n';
+    }
+    const auto mapping = map_all_regions(bridge, requests, 10000);
+    for (std::size_t i = 0; i < mapping.results.size(); ++i) {
+        if (mapping.results[i].ready()) continue;
+        report_mapping_failure(i, requests[i], mapping.results[i]);
+        ok = false;
     }
     if (desktop) {
         for (const auto& result : bridge.set_widget_previews(requests)) {

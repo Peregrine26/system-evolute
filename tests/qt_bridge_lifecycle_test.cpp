@@ -36,8 +36,14 @@ int main(int argc, char** argv) {
     // the interval after Qt releases its native window and before recreation.
     window.release_native_window();
     check(window.internalWinId() == 0, "native window was not released");
-    check(state_notifications >= 2 && !bridge.hotkey_state().ready(),
-          "native handle loss was not reported to C");
+    // Exactly one notification for the initial registration and exactly one for
+    // the handle loss. Duplicates would mean the bridge reports a single state
+    // change more than once and C would rebuild its allow-hide state twice.
+    if (state_notifications != 2) {
+        std::cerr << "hotkey state notifications=" << state_notifications << '\n';
+    }
+    check(state_notifications == 2 && !bridge.hotkey_state().ready(),
+          "native handle loss was not reported exactly once to C");
 
     MSG message{};
     qintptr result = 123;
