@@ -59,6 +59,11 @@ class RepositoryChecksTest(unittest.TestCase):
         self.assertEqual([], self.links(nested))
         self.assertTrue(self.links("[![preview](missing.png)](docs/details.md)"))
         self.assertTrue(self.links("[![preview](assets/preview.png)](missing.md)"))
+        self.assertFalse(self.links("文字里的 ](missing.md) 没有打开的方括号"))
+
+    def test_missing_tracked_heading_target_is_reported(self):
+        self.files.add("docs/deleted.md")
+        self.assertTrue(any("cannot be read" in error for error in self.links("[target](docs/deleted.md#heading)")))
 
     def test_escaping_and_machine_specific_links_fail(self):
         self.assertTrue(self.links("[escape](../outside.md)"))
@@ -72,8 +77,12 @@ class RepositoryChecksTest(unittest.TestCase):
         self.assertTrue(checks.boundary_errors("src/platform/window_api_adapter.h", 'HWND window;'))
         self.assertTrue(checks.boundary_errors("src/core/model.cpp", '#include <X11/Xlib.h>'))
         self.assertFalse(checks.boundary_errors("src/platform/windows/backend.cpp", '#include <windows.h>'))
+        self.assertTrue(checks.boundary_errors("src/app/main.cpp", '#include <windows.h>'))
+        self.assertTrue(checks.boundary_errors("src/core/rules.ipp", '#include <dwmapi.h>'))
         self.assertFalse(checks.boundary_errors(
             "src/core/model.cpp", 'const char* s = R"tag(HWND // #include <windows.h>)tag";'))
+        self.assertFalse(checks.boundary_errors("src/core/model.cpp", 'const char* s = R"(HWND)";'))
+        self.assertFalse(checks.boundary_errors("src/core/model.cpp", 'const char* s = u8R"tag(HWND)tag";'))
 
     def test_missing_boundary_target_is_reported(self):
         self.file("README.md", "# Fixture\n")

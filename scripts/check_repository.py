@@ -17,7 +17,8 @@ NEUTRAL_FILES = frozenset({
     "src/platform/layout_executor.h",
     "src/platform/layout_executor.cpp",
 })
-NEUTRAL_PREFIXES = ("src/core/", "src/ui/")
+NEUTRAL_PREFIXES = ("src/app/", "src/core/", "src/ui/")
+NATIVE_SOURCE_SUFFIXES = (".h", ".hpp", ".hxx", ".cpp", ".cc", ".cxx", ".ipp")
 
 
 def git(root: Path, *args: str) -> str:
@@ -45,8 +46,17 @@ def markdown_links(text: str) -> list[str]:
     text = prose(text)
     # Inline links/images and full reference definitions. Inline code is not a link.
     text = re.sub(r"`+[^`\n]*`+", "", text)
-    # Match each destination marker, including both targets in [![alt](a.png)](b.md).
-    inline = re.findall(r"\]\(\s*(<[^>]+>|[^\s)]+)", text)
+    # Keep a bracket stack so nested image and outer link targets are both checked.
+    inline = []
+    brackets = 0
+    for match in re.finditer(r"(?<!\\)[\[\]]", text):
+        if match.group() == "[":
+            brackets += 1
+        elif brackets:
+            brackets -= 1
+            destination = re.match(r"\(\s*(<[^>]+>|[^\s)]+)", text[match.end():])
+            if destination:
+                inline.append(destination.group(1))
     references = re.findall(r"(?m)^ {0,3}\[[^\]\n]+\]:\s*(<[^>]+>|\S+)", text)
     return [item.strip("<>") for item in inline + references]
 
@@ -90,7 +100,12 @@ def link_errors(root: Path, files: set[str], source: str, text: str) -> list[str
         if relative not in files and not is_directory:
             errors.append(f"{source}: missing/untracked local link: {destination}")
         elif parts.fragment and relative.lower().endswith(".md"):
-            if unquote(parts.fragment) not in anchors(target.read_text(encoding="utf-8")):
+            try:
+                target_text = target.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                errors.append(f"{source}: linked Markdown file cannot be read: {destination}")
+                continue
+            if unquote(parts.fragment) not in anchors(target_text):
                 errors.append(f"{source}: missing heading: {destination}")
     return errors
 
@@ -100,7 +115,7 @@ def neutral_source(path: str) -> bool:
 
 
 def boundary_errors(path: str, text: str) -> list[str]:
-    if not neutral_source(path) or not path.endswith((".h", ".hpp", ".cpp")):
+    if not neutral_source(path) or not path.endswith(NATIVE_SOURCE_SUFFIXES):
         return []
     # Raw strings can contain comment markers and native-looking examples.
     code = re.sub(r'(?:u8|u|U|L)?R"(?P<delimiter>[^ ()\\\t\r\n]{0,16})\(.*?\)(?P=delimiter)"',
@@ -133,7 +148,7 @@ def check_files(root: Path, paths: list[str]) -> list[str]:
         if not file.is_file():
             errors.append(f"{path}: tracked file is absent")
             continue
-        if file.suffix.lower() not in {".md", ".cpp", ".h", ".hpp", ".py", ".ps1", ".yml", ".yaml", ".json", ".txt"}:
+        if file.suffix.lower() not in {".md", ".py", ".ps1", ".yml", ".yaml", ".json", ".txt", *NATIVE_SOURCE_SUFFIXES}:
             continue
         try:
             text = file.read_text(encoding="utf-8")

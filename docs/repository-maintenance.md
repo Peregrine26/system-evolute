@@ -17,16 +17,27 @@ C 主题分支   ── PR ──> c ── 集成 PR ──> main
 由另外两位受影响组员审阅，普通改动至少一名其他组员 Approve。AI 会话审查
 可以辅助，不能登记成另一位组员的人工批准或由作者自批。
 
+按项目负责人的决定，`c` 保留 PR 留痕和 CI，但批准数设为 0，以便 C 在角色分支
+迭代。C 合入前仍核对变更和失败路径；进入 `main` 的集成 PR 由其他组员正式批准，
+涉及共享接口或行为时由另两位受影响组员审阅。`c` 的改动若长期未进入 `main`，
+应拆成小型集成 PR，避免一次评审过大的差异。
+
 本次整改前已存在的 `b/core-mvp`、`c-ui-fullscreen`、`codex/qt-preview-runtime-fixes`
 等旧分支不改写历史或自动改名；新建任务遵循 `agent.md` 的 Conventional 分支名。
 旧分支完成后按正常清理规则退出，不把旧名用作新任务模板。
 
 GitHub 对 `main` 要求：最新分支基线、至少一次其他人的评审批准、最后推送者
 以外的批准、过期批准失效、评审对话全部解决、必需 CI 成功。`c` 不配置强制
-评审批准，但仍要求最新分支基线、评审对话解决及必需 CI 成功。管理员也受约束，
+评审批准（批准数为 0），但仍要求通过 PR、最新分支基线、评审对话解决及必需 CI 成功。管理员也受约束，
 两个分支均禁止强推与删除。基础必需检查是 `platform`、`qt`；`main` 另要求
 本轮新增的 `repository`。`c` 尚未包含仓库检查 workflow，暂不要求一个不会
 运行的检查；后续同步该 workflow 时，再将其加入 `c` 的必需检查。
+
+2026-11-24 使用有管理权限的 GitHub API 回读 `/branches/{main,c}/protection`：
+`main` 批准数 1、最后推送另人批准、过期批准失效，必需检查为
+`platform/qt/repository`；`c` 的 PR 审查规则对象存在、批准数 0、无需最后推送
+另人批准，必需检查为 `platform/qt`。两者均要求最新基线、对话解决和管理员
+遵守保护，均禁止强推与删除。此处是当日快照，后续改设置仍需重新回读。
 
 全部已推送分支还受 `Preserve published branch history` ruleset 约束：
 禁止 non-fast-forward 更新，无绕过名单；普通主题分支仍可正常追加提交。
@@ -56,7 +67,7 @@ python -m unittest discover -s tests -p test_repository_checks.py -v
 UI/核心/中立接口中的原生头文件与类型。它不会联网检查外链，不替代许可证、
 凭证检查、产品语义、完整 C++ 编译、动态桌面验收或人工评审。
 
-`.github/workflows/repository.yml` 在 push/PR 运行同一检查及 8 项反例测试。
+`.github/workflows/repository.yml` 在 `main`/`c` push 与 PR 运行同一检查及反例测试。
 CI 另将 PR base SHA 传给 `--base`，对完整变更运行 `git diff --check`；首个分支
 push 没有有效 before SHA 时，先检查最新提交，随后 PR 检查完整 base...head 范围。
 测试包含真实临时 Git 仓库，确认已提交的尾随空格也会使门禁失败。

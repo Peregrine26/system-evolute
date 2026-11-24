@@ -1,6 +1,6 @@
 # 实现与验证状态
 
-2026-10-27 核对的基线：`main` 为 `c5174ea`，C 角色分支 `c` 为 `291f83d`。
+2026-11-24 核对的基线：`main` 为 `c5174ea`，C 角色分支 `c` 为 `291f83d`。
 本文维护实现位置与验证证据；产品目标由[项目总览](project-overview.md)持有，
 角色职责由[三人分工](team-responsibilities.md)持有。后续合入时更新本表。
 
@@ -11,7 +11,7 @@
 | 原生/Qt DWM、全局快捷键桥接 | A 的独立实验已在 `main`，不等于正式 UI 已接线 | [A 实机记录](a-platform-integration.md)；本机快捷键占用失败路径通过，真实按键仍待可用环境验证 |
 | C 全屏卡片总览 | [PR #1](https://github.com/Peregrine26/system-evolute/pull/1) 已合入 `c`，尚未合入 `main` | head `507a82b` 经独立 AI 复核，本机 11/11 CTest、UI 63 项断言及 [CI](https://github.com/Peregrine26/system-evolute/actions/runs/40472354148) 通过；合并树与该 head 一致 |
 | A 控件级预览桥接 | [PR #4](https://github.com/Peregrine26/system-evolute/pull/4)，head `15b2c1b`，待组员正式审阅 | PR 记录本机 10/10 与 Qt/MSVC CI；旧 C 夹具与新 C 总览须区分，合并时解决 CMake 集成冲突 |
-| B 筛选、选择与布局 | 远端 `b/core-mvp`，核对 head `ea1563d`；[Draft PR #6](https://github.com/Peregrine26/system-evolute/pull/6) 待作者确认就绪 | 作者记录纯 C++ 单测和流水线测试；本轮不将作者报告改写为整改会话复验 |
+| B 筛选、选择与布局 | 远端 `b/core-mvp`；[PR #6](https://github.com/Peregrine26/system-evolute/pull/6) 已转为可评审 | 作者记录纯 C++ 单测和流水线测试；本轮不将作者报告改写为整改会话复验 |
 | 主线 Qt 用户入口 | `src/app/main.cpp` 仍是最小窗口骨架 | 不将演示程序或角色分支的能力记为正式用户流程已完成 |
 | Workspace、X11、配置及整体验收 | 尚未在 `main` 实现完整流程 | [项目总览](project-overview.md)；原型、编译通过与桌面验收分别记录 |
 
