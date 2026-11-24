@@ -419,7 +419,7 @@ void scenario6_failed_query_still_silent() {
     //   CHECK_CURRENT_KNOWN_BEHAVIOR(scan.complete)
     //       ->  CHECK(!scan.complete)
     //   CHECK_CURRENT_KNOWN_BEHAVIOR(scan.windows.size() == 4)
-    //       ->  CHECK(scan.windows.size() == 5)   // browser back in the list
+    //       ->  CHECK(scan.windows.size() == 4)   // window still skipped, count unchanged
     //   CHECK_CURRENT_KNOWN_BEHAVIOR(verdict.error == SelectionError::WindowGone)
     //       ->  CHECK(verdict.error == SelectionError::ScanIncomplete)
     // -----------------------------------------------------------------------

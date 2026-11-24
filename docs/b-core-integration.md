@@ -1,8 +1,8 @@
 # B 模块联调说明：窗口筛选、选择校验与两窗布局
 
-> 对应分支 `b/core-mvp`，基线为 `main@c5174ea`（已含 A 的 Windows 平台服务、Qt 预览集成与 `agent.md` 协作规范）。本文说明 B 的核心逻辑如何接进现有仓库、与 A 接口的对齐结果，以及还剩下的一处语义缺口。**`main` 分支未改动。**
+> 对应分支 `b/core-mvp`，基线为 `main@cceae24`（已含 A 的 Windows 平台服务、Qt 预览集成、仓库检查与 `agent.md` 协作规范）。本文说明 B 的核心逻辑如何接进现有仓库、与 A 接口的对齐结果，以及还剩下的一处语义缺口。
 
-`9f819ca..c5174ea` 这段只改了 Qt 桥接、桌面服务自检、CI 与文档，`window_info.h`、`windows_window_scanner.*`、`layout_executor.*` 一行未动，所以 B 的代码不需要跟着改，只需变基。
+`9f819ca..cceae24` 这段只改了 Qt 桥接、桌面服务自检、仓库检查脚本、CI 与文档，`window_info.h`、`windows_window_scanner.*`、`layout_executor.*` 一行未动，所以 B 的代码不需要跟着改，只需变基。
 
 ## 1. 这次加了什么
 
@@ -37,7 +37,7 @@ ctest -C Release -LE interactive-desktop
 
 标了 `interactive-desktop` 的 `win32_backend_selftest` / `desktop_services_selftest` 会移动和隐藏真实窗口，本地未执行，属于待验证项；它们不在本分支的行为范围内，也没有被本分支改动。
 
-云端检查：`.github/workflows/windows-platform.yml` 的 `platform` 任务原先只跑 `layout_executor_test`，本分支把它扩成 `^(layout_executor_test|core_tests|pipeline_tests)$`，让 B 的两个测试在没有 Qt 的快速任务里就能跑（它们不需要桌面）。`qt` 任务用的 `-LE interactive-desktop` 本来就会带上这两个用例，属于重复覆盖，不是唯一覆盖。
+云端检查：`.github/workflows/windows-platform.yml` 的 `platform` 任务按标签排除桌面用例（`ctest -LE interactive-desktop --no-tests=error`），B 的 `core_tests` / `pipeline_tests` 不带 `interactive-desktop` 标签，合入 `main` 后会被这个任务自动跑到，不再需要单独扩正则。`qt` 任务用同样的过滤条件，属于重复覆盖，不是唯一覆盖。
 
 ## 2. 与 A 的新接口对齐
 
