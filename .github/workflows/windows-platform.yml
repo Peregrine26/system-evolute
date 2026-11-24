@@ -18,6 +18,9 @@ jobs:
         run: cmake -S . -B build-platform -G "Visual Studio 17 2022" -A x64 -DCROSSDESK_BUILD_GUI=OFF
       - name: Build
         run: cmake --build build-platform --config Debug --parallel
+      # 选测试用标签排除而不是白名单正则：core_tests / pipeline_tests /
+      # layout_executor_test 都不带 interactive-desktop 标签，后续新增的
+      # 无桌面测试也会自动纳入，不用每次回来改正则。
       - name: Test without desktop operations
         run: ctest --test-dir build-platform -C Debug -LE interactive-desktop --output-on-failure --no-tests=error
 
