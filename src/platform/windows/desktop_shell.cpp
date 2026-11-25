@@ -15,6 +15,11 @@
 #include <algorithm>
 
 namespace crossdesk::desktop {
+int windowGeometryGesture(void* nativeMessage) {
+    if (!nativeMessage) return 0;
+    const auto message = static_cast<MSG*>(nativeMessage)->message;
+    return message == WM_ENTERSIZEMOVE ? 1 : message == WM_EXITSIZEMOVE ? -1 : 0;
+}
 namespace {
 class ComScope {
 public:

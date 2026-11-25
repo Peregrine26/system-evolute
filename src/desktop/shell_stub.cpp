@@ -1,6 +1,7 @@
 #include <QCoreApplication>
 #include "desktop/shell.h"
 namespace crossdesk::desktop {
+int windowGeometryGesture(void*) { return 0; }
 bool systemFileMenu(const QString&, std::uintptr_t, const QPoint&) { return false; }
 bool fileProperties(const QString&, std::uintptr_t) { return false; }
 bool openWith(const QString&, std::uintptr_t) { return false; }

@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include "desktop/store.h"
+#include "desktop/record_actions.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -10,11 +11,14 @@
 #include <QJsonDocument>
 #include <QMap>
 #include <QSaveFile>
+#include <QRegularExpression>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QSet>
 #include <QUuid>
 #include <QUrl>
 #include <functional>
+#include <memory>
 
 namespace crossdesk::desktop {
 namespace {
@@ -203,70 +207,198 @@ bool Store::setSettings(const QJsonObject& settings) {
     auto next = state_; next["settings"] = settings;
     return commit(next);
 }
+namespace {
+QString pathIdentity(const QString& path) {
+    auto result = QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath()));
+#ifdef Q_OS_WIN
+    result = result.toCaseFolded();
+#endif
+    return result;
+}
+bool portableAssetPath(const QString& path) {
+    if (!path.startsWith("attachments/") || path == "attachments/" ||
+        QDir::cleanPath(path) != path || path.contains('\\')) return false;
+    static const QRegularExpression bad(QStringLiteral("[\\x00-\\x1f<>:\"|?*]"));
+    static const QRegularExpression reserved(QStringLiteral("^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)"), QRegularExpression::CaseInsensitiveOption);
+    for (const auto& part : path.split('/'))
+        if (part.isEmpty() || part.endsWith('.') || part.endsWith(' ') || bad.match(part).hasMatch() || reserved.match(part).hasMatch()) return false;
+    return true;
+}
+QStringList attachmentReferences(const QJsonObject& state) {
+    QStringList paths;
+    for (const auto* key : {"todos", "notes"}) for (const auto& value : state[key].toArray())
+        paths << recordAttachmentPaths(value.toObject());
+    paths.removeDuplicates(); paths.sort(); return paths;
+}
+QJsonValue rewritePaths(const QJsonValue& value, const QMap<QString, QString>& paths, bool urls = true) {
+    if (value.isString()) {
+        auto text = value.toString();
+        const auto exact = paths.constFind(pathIdentity(text));
+        if (exact != paths.cend()) return exact.value();
+        // Only complete file URLs are replaced; an attachment named a.txt must
+        // never rewrite a different link named a.txt2.
+        static const QRegularExpression links(QStringLiteral("file:[^\\s)<>]+"));
+        struct Edit { int position; int count; QString text; };
+        QList<Edit> edits; auto matches = links.globalMatch(text);
+        while (matches.hasNext()) {
+            const auto match = matches.next(); const auto url = QUrl(match.captured());
+            if (!url.isLocalFile()) continue;
+            const auto replacement = paths.constFind(pathIdentity(url.toLocalFile()));
+            if (replacement != paths.cend()) edits.prepend({int(match.capturedStart()), int(match.capturedLength()),
+                urls ? QUrl::fromLocalFile(replacement.value()).toString(QUrl::FullyEncoded) : replacement.value()});
+        }
+        for (const auto& edit : edits) text.replace(edit.position, edit.count, edit.text);
+        return text;
+    }
+    if (value.isArray()) { QJsonArray result; for (const auto& item : value.toArray()) result.append(rewritePaths(item, paths, urls)); return result; }
+    if (value.isObject()) {
+        auto result = value.toObject(); for (auto it = result.begin(); it != result.end(); ++it) it.value() = rewritePaths(it.value(), paths, urls);
+        return result;
+    }
+    return value;
+}
+QByteArray recordSignature(QJsonObject record, const QMap<QString, QString>& assets) {
+    if (record["title"] == record["restoreCopyTitle"] && record["restoreSourceTitle"].isString()) record["title"] = record["restoreSourceTitle"];
+    for (const auto* key : {"id", "restoreOriginId", "restoreSourceTitle", "restoreCopyTitle"}) record.remove(key);
+    return QCryptographicHash::hash(QJsonDocument(rewritePaths(record, assets, false).toObject()).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256);
+}
+}
 bool Store::exportBackup(const QString& file, QString* error) const {
     auto backup = state_; QJsonArray assets; qint64 total = 0;
-    const auto base = directory_ + "/attachments";
-    if (QFileInfo::exists(base)) {
-        QDirIterator files(base, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden, QDirIterator::Subdirectories);
-        while (files.hasNext()) {
-            const auto path = files.next(); const auto info = files.fileInfo();
-            if (info.isSymLink()) return fail(error, QCoreApplication::translate("CrossDesk", "备份附件中存在符号链接"));
-            total += info.size();
-            if (total > 16 * 1024 * 1024) return fail(error, QCoreApplication::translate("CrossDesk", "此便携备份的附件上限为 16 MB，请单独备份较大的附件目录"));
-            QFile input(path); if (!input.open(QIODevice::ReadOnly)) return fail(error, input.errorString());
-            const auto bytes = input.readAll();
-            assets.append(QJsonObject{{"path", QDir(directory_).relativeFilePath(path)},
-                {"sha256", QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex())},
-                {"base64", QString::fromLatin1(bytes.toBase64())}});
-        }
+    const auto base = QFileInfo(directory_ + "/attachments").absoluteFilePath();
+    QSet<QString> included, required;
+    for (const auto* key : {"todos", "notes"}) for (const auto& value : state_[key].toArray())
+        for (const auto& path : value.toObject()["attachments"].toArray()) if (path.isString()) required.insert(pathIdentity(path.toString()));
+    for (const auto& path : attachmentReferences(state_)) {
+        const auto identity = pathIdentity(path); if (!inside(identity, pathIdentity(base))) continue;
+        if (included.contains(identity)) continue; included.insert(identity);
+        const QFileInfo info(path); const auto relative = QDir(directory_).relativeFilePath(info.absoluteFilePath());
+        // A missing image/link in Markdown is retained as text. Explicitly
+        // managed attachments must exist so a backup cannot silently omit them.
+        if (!info.exists() && !required.contains(identity) && !info.isSymbolicLink() && !info.isJunction()) continue;
+        if (!portableAssetPath(relative) || !info.isFile() || info.isSymbolicLink() || info.isJunction() ||
+            !inside(pathIdentity(info.canonicalFilePath()), pathIdentity(QFileInfo(directory_).canonicalFilePath() + "/attachments")))
+            return fail(error, QCoreApplication::translate("CrossDesk", "托管附件不存在或路径不安全，备份未导出"));
+        if (total + info.size() > 16 * 1024 * 1024)
+            return fail(error, QCoreApplication::translate("CrossDesk", "此便携备份的附件上限为 16 MB，请单独备份较大的附件目录"));
+        QFile input(path); if (!input.open(QIODevice::ReadOnly)) return fail(error, input.errorString());
+        const auto bytes = input.readAll(); total += bytes.size();
+        if (input.error() != QFile::NoError || total > 16 * 1024 * 1024)
+            return fail(error, QCoreApplication::translate("CrossDesk", "附件读取失败或超过备份上限"));
+        assets.append(QJsonObject{{"path", relative},
+            {"sha256", QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex())},
+            {"base64", QString::fromLatin1(bytes.toBase64())}});
     }
     backup["backupAssets"] = assets; backup["backupRoot"] = QFileInfo(directory_).absoluteFilePath();
     if (QJsonDocument(backup).toJson().size() > 32 * 1024 * 1024) return fail(error, QCoreApplication::translate("CrossDesk", "备份超过 32 MB 上限"));
     return writeJson(file, backup, error);
 }
-bool Store::importBackup(const QString& file, QString* error) {
+bool Store::importBackup(const QString& file, QString* error) { return importBackup(file, RestoreMode::ReplaceData, error); }
+bool Store::importBackup(const QString& file, RestoreMode mode, QString* error) {
     QJsonObject loaded;
     if (!readJson(file, loaded, error)) return false;
     const auto assets = loaded["backupAssets"].toArray();
-    QMap<QString, QByteArray> decoded; qint64 total = 0;
+    QMap<QString, QByteArray> decoded; QMap<QString, QString> assetPaths, tokens; qint64 total = 0;
+    const auto originalRoot = loaded["backupRoot"].toString();
+    if (!assets.isEmpty() && !QDir::isAbsolutePath(originalRoot))
+        return fail(error, QCoreApplication::translate("CrossDesk", "备份来源目录无效"));
     for (const auto& value : assets) {
         const auto asset = value.toObject(); const auto path = asset["path"].toString();
-        const auto clean = QDir::cleanPath(path);
-        if (!path.startsWith("attachments/") || clean != path || path.contains('\\') ||
-            path.contains(':') || path.contains("/../") || decoded.contains(path))
+        const auto identity = pathIdentity(originalRoot + '/' + path);
+        if (!portableAssetPath(path) || decoded.contains(identity))
             return fail(error, QCoreApplication::translate("CrossDesk", "备份附件路径无效"));
         const auto result = QByteArray::fromBase64Encoding(asset["base64"].toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
         if (result.decodingStatus != QByteArray::Base64DecodingStatus::Ok ||
             QCryptographicHash::hash(result.decoded, QCryptographicHash::Sha256).toHex() != asset["sha256"].toString().toLatin1())
             return fail(error, QCoreApplication::translate("CrossDesk", "备份附件校验失败"));
         total += result.decoded.size(); if (total > 16 * 1024 * 1024) return fail(error, QCoreApplication::translate("CrossDesk", "备份附件过大"));
-        decoded[path] = result.decoded;
+        decoded[identity] = result.decoded; assetPaths[identity] = path;
+        tokens[identity] = "attachment-sha256:" + asset["sha256"].toString().toLower();
     }
-    const auto targetRoot = directory_ + "/attachments/restored-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const auto originalRoot = loaded["backupRoot"].toString();
-    QMap<QString, QString> paths;
-    for (auto it = decoded.cbegin(); it != decoded.cend(); ++it) {
-        const auto target = targetRoot + '/' + it.key().mid(QString("attachments/").size());
-        if (!QDir().mkpath(QFileInfo(target).absolutePath())) return fail(error, QCoreApplication::translate("CrossDesk", "无法恢复附件目录"));
-        QSaveFile output(target);
-        if (!output.open(QIODevice::WriteOnly) || output.write(it.value()) != it.value().size() || !output.commit())
-            return fail(error, QCoreApplication::translate("CrossDesk", "附件恢复失败，原配置已保留"));
-        paths[originalRoot + '/' + it.key()] = target;
-    }
-    std::function<QJsonValue(const QJsonValue&)> rebase = [&](const QJsonValue& value) -> QJsonValue {
-        if (value.isString()) {
-            auto text = value.toString();
-            if (paths.contains(text)) return paths.value(text);
-            for (auto it = paths.cbegin(); it != paths.cend(); ++it)
-                text.replace(QUrl::fromLocalFile(it.key()).toString(), QUrl::fromLocalFile(it.value()).toString());
-            return text;
+    QJsonObject next = mode == RestoreMode::MergeRecords ? state_ : loaded;
+    next.remove("backupAssets"); next.remove("backupRoot"); next["settings"] = settings();
+    if (mode == RestoreMode::ReplaceData) next["operations"] = QJsonArray{};
+    QMap<QString, QString> currentTokens;
+    auto currentSignature = [&](const QJsonObject& record) {
+        for (const auto& path : recordAttachmentPaths(record)) {
+            const auto identity = pathIdentity(path);
+            if (currentTokens.contains(identity) || !inside(identity, pathIdentity(directory_ + "/attachments"))) continue;
+            QFile input(path); const QFileInfo info(path);
+            if (!info.isFile() || info.size() > 16 * 1024 * 1024 || !input.open(QIODevice::ReadOnly)) continue;
+            QCryptographicHash hash(QCryptographicHash::Sha256);
+            if (hash.addData(&input)) currentTokens[identity] = "attachment-sha256:" + QString::fromLatin1(hash.result().toHex());
         }
-        if (value.isArray()) { QJsonArray array; for (const auto& item : value.toArray()) array.append(rebase(item)); return array; }
-        if (value.isObject()) { auto object = value.toObject(); for (auto it = object.begin(); it != object.end(); ++it) it.value() = rebase(it.value()); return object; }
-        return value;
+        return recordSignature(record, currentTokens);
     };
-    loaded.remove("backupAssets"); loaded.remove("backupRoot");
-    return commit(rebase(loaded).toObject(), error);
+    QJsonObject imported{{"todos", QJsonArray{}}, {"notes", QJsonArray{}}};
+    for (const auto* key : {"todos", "notes"}) {
+        auto records = mode == RestoreMode::MergeRecords ? next[key].toArray() : QJsonArray{};
+        QJsonArray additions;
+        for (const auto& value : loaded[key].toArray()) {
+            auto record = value.toObject(); const auto id = record["id"].toString();
+            if (mode == RestoreMode::MergeRecords) {
+                QJsonObject collision;
+                for (const auto& current : records) if (current.toObject()["id"].toString() == id) { collision = current.toObject(); break; }
+                if (!collision.isEmpty()) {
+                    const auto signature = recordSignature(record, tokens);
+                    bool duplicate = currentSignature(collision) == signature;
+                    for (const auto& current : records) {
+                        const auto copy = current.toObject();
+                        if (!duplicate && copy["restoreOriginId"].toString() == id && currentSignature(copy) == signature) duplicate = true;
+                    }
+                    if (duplicate) continue;
+                    const auto sourceTitle = record["title"].toString();
+                    const auto copyTitle = sourceTitle + QCoreApplication::translate("CrossDesk", "（导入冲突副本）");
+                    record["id"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                    record["restoreOriginId"] = id; record["restoreSourceTitle"] = sourceTitle;
+                    record["title"] = copyTitle; record["restoreCopyTitle"] = copyTitle;
+                }
+            }
+            records.append(record); additions.append(record);
+        }
+        next[key] = records; imported[key] = additions;
+    }
+    if (!Store::validate(next, error)) return false;
+    // Decode and validate the complete archive first, but materialize only the
+    // files referenced by imported records. Old orphan restore trees stay out.
+    QSet<QString> needed;
+    for (const auto& path : attachmentReferences(imported)) if (decoded.contains(pathIdentity(path))) needed.insert(pathIdentity(path));
+    const auto attachmentBase = directory_ + "/attachments";
+    if (!needed.isEmpty() && (!QDir().mkpath(attachmentBase) || QFileInfo(attachmentBase).isSymbolicLink() || QFileInfo(attachmentBase).isJunction() ||
+        pathIdentity(QFileInfo(attachmentBase).canonicalFilePath()) != pathIdentity(QFileInfo(directory_).canonicalFilePath() + "/attachments")))
+        return fail(error, QCoreApplication::translate("CrossDesk", "附件恢复目录不安全，原配置已保留"));
+    std::unique_ptr<QTemporaryDir> staging;
+    if (!needed.isEmpty()) {
+        staging = std::make_unique<QTemporaryDir>(attachmentBase + "/.import-XXXXXX");
+        if (!staging->isValid()) return fail(error, QCoreApplication::translate("CrossDesk", "无法恢复附件目录"));
+    }
+    const auto targetRoot = attachmentBase + "/restored-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QMap<QString, QString> paths;
+    for (const auto& identity : needed) {
+        const auto relative = assetPaths[identity].mid(QString("attachments/").size());
+        const auto temporary = staging->path() + '/' + relative;
+        if (!QDir().mkpath(QFileInfo(temporary).absolutePath())) return fail(error, QCoreApplication::translate("CrossDesk", "无法恢复附件目录"));
+        QSaveFile output(temporary);
+        if (!output.open(QIODevice::WriteOnly) || output.write(decoded[identity]) != decoded[identity].size() || !output.commit())
+            return fail(error, QCoreApplication::translate("CrossDesk", "附件恢复失败，原配置已保留"));
+        paths[identity] = targetRoot + '/' + relative;
+    }
+    // Rebase only imported records, never existing local records or settings.
+    for (const auto* key : {"todos", "notes"}) {
+        auto records = next[key].toArray(); const int first = records.size() - imported[key].toArray().size();
+        for (int i = first; i < records.size(); ++i) records[i] = rewritePaths(records[i], paths);
+        next[key] = records;
+    }
+    if (!needed.isEmpty() && !QDir().rename(staging->path(), targetRoot))
+        return fail(error, QCoreApplication::translate("CrossDesk", "无法提交恢复附件，原配置已保留"));
+    if (next == state_ || commit(next, error)) {
+        if (!needed.isEmpty()) staging->setAutoRemove(false);
+        return true;
+    }
+    // targetRoot is the unique directory created by this import, never an old
+    // attachment tree. Remove it only when the state commit did not succeed.
+    if (!needed.isEmpty()) QDir(targetRoot).removeRecursively();
+    return false;
 }
 
 FileResult copyPath(const QString& source, const QString& destination) {

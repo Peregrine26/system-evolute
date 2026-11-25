@@ -15,4 +15,6 @@ int systemVolume();
 bool setSystemVolume(int value);
 bool setAutoStart(bool enabled, const QString& executable, QString* error);
 QString lunarDate(const QDate& date);
+// 1/-1 denote the start/end of this window's native move/resize gesture.
+int windowGeometryGesture(void* nativeMessage);
 }

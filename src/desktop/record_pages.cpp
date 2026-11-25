@@ -300,18 +300,21 @@ public:
     explicit NotePage(Store& store) : store_(store) {
         auto* layout = new QVBoxLayout(this); auto* tools = new QHBoxLayout;
         button(tools, QCoreApplication::translate("CrossDesk", "新随记"), [this] {
-            flush(); auto records = store_.records("notes"); selected_ = QUuid::createUuid().toString();
-            records.append(QJsonObject{{"id", selected_}, {"title", QCoreApplication::translate("CrossDesk", "新随记")}, {"body", ""}});
-            store_.setRecords("notes", records);
+            if (!flush()) return;
+            auto records = store_.records("notes"); const auto id = QUuid::createUuid().toString();
+            records.append(QJsonObject{{"id", id}, {"title", QCoreApplication::translate("CrossDesk", "新随记")}, {"body", ""}});
+            if (!store_.setRecords("notes", records)) return;
+            selected_ = id;
             { QSignalBlocker blocker(editor_); editor_->clear(); preview_->clear(); dirty_ = false; loadedBody_.clear(); }
             refresh(); pane_->details();
         })->setObjectName("newNote");
         button(tools, QCoreApplication::translate("CrossDesk", "转为待办"), [this] {
-            flush(); const auto note = current(); if (note.isEmpty()) return;
-            store_.convertRecord("notes", "todos", selected_); selected_.clear(); refresh();
+            if (!flush()) return; const auto note = current(); if (note.isEmpty()) return;
+            if (store_.convertRecord("notes", "todos", selected_).isEmpty()) return;
+            selected_.clear(); refresh();
         });
         button(tools, QCoreApplication::translate("CrossDesk", "附件"), [this] {
-            flush(); if (selected_.isEmpty()) return;
+            if (!flush() || selected_.isEmpty()) return;
             AttachmentDialog dialog(store_, "notes", selected_, this); dialog.exec(); if (!dirty_) loadEditor();
         })->setObjectName("noteAttachments");
         button(tools, QCoreApplication::translate("CrossDesk", "导出 Markdown"), [this] {
@@ -322,7 +325,8 @@ public:
         button(tools, QCoreApplication::translate("CrossDesk", "删除"), [this] {
             const auto ids = selectedIds(list_); if (ids.isEmpty()) return;
             if (ids.size() > 1 && QMessageBox::question(this, QCoreApplication::translate("CrossDesk", "删除随记"), QCoreApplication::translate("CrossDesk", "删除所选的 %1 篇随记？附件原文件保留。").arg(ids.size())) != QMessageBox::Yes) return;
-            flush(); if (removeRecords(store_, "notes", ids)) { if (ids.contains(selected_)) { selected_.clear(); dirty_ = false; } refresh(); }
+            if (!flush()) return;
+            if (removeRecords(store_, "notes", ids)) { if (ids.contains(selected_)) { selected_.clear(); dirty_ = false; } refresh(); }
         })->setObjectName("deleteNotes"); layout->addLayout(tools);
         auto* options = new QHBoxLayout;
         pin_ = new QCheckBox(QCoreApplication::translate("CrossDesk", "固定")); pin_->setObjectName("pinNote"); options->addWidget(pin_);
@@ -343,7 +347,12 @@ public:
         connect(&saveTimer_, &QTimer::timeout, this, [this] { flush(); });
         connect(editor_, &QPlainTextEdit::textChanged, this, [this] { dirty_ = true; preview_->setMarkdown(editor_->toPlainText()); saveTimer_.start(); });
         connect(list_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* row) {
-            flush(); selected_ = row ? row->data(Qt::UserRole).toString() : QString{};
+            if (!flush()) {
+                QSignalBlocker blocker(list_);
+                for (int i = 0; i < list_->count(); ++i) if (list_->item(i)->data(Qt::UserRole).toString() == selected_) { list_->setCurrentRow(i); break; }
+                return;
+            }
+            selected_ = row ? row->data(Qt::UserRole).toString() : QString{};
             loadEditor();
         });
         connect(&store_, &Store::changed, this, [this] { QTimer::singleShot(0, this, [this] { refresh(); }); });
@@ -367,27 +376,31 @@ private:
         for (const auto& value : store_.records("notes")) if (value.toObject()["id"].toString() == selected_) return value.toObject();
         return {};
     }
-    void flush() {
-        saveTimer_.stop(); if (selected_.isEmpty() || !dirty_) return;
+    bool flush() {
+        saveTimer_.stop(); if (selected_.isEmpty() || !dirty_) return true;
         auto records = store_.records("notes");
         for (int i = 0; i < records.size(); ++i) {
             auto note = records[i].toObject(); if (note["id"].toString() != selected_) continue;
             const auto text = editor_->toPlainText();
-            if (note["body"].toString() == text) { dirty_ = false; loadedBody_ = text; return; }
+            if (note["body"].toString() == text) { dirty_ = false; loadedBody_ = text; return true; }
             if (note["body"].toString() != loadedBody_) {
                 // Two note widgets edited the same record. Preserve both texts.
-                selected_ = QUuid::createUuid().toString(); note["id"] = selected_;
+                const auto copyId = QUuid::createUuid().toString(); note["id"] = copyId;
                 note["title"] = QCoreApplication::translate("CrossDesk", "并发编辑副本"); note["body"] = text;
                 records.append(note);
-                if (store_.setRecords("notes", records)) { dirty_ = false; loadedBody_ = text; }
-                return;
+                if (!store_.setRecords("notes", records)) return false;
+                selected_ = copyId; dirty_ = false; loadedBody_ = text; return true;
             }
             note["body"] = text; note["title"] = text.section('\n', 0, 0).left(60).remove('#').trimmed();
             if (note["title"].toString().isEmpty()) note["title"] = QCoreApplication::translate("CrossDesk", "新随记");
             records[i] = note;
-            if (store_.setRecords("notes", records)) { dirty_ = false; loadedBody_ = text; }
-            return;
+            if (!store_.setRecords("notes", records)) return false;
+            dirty_ = false; loadedBody_ = text; return true;
         }
+        const auto copyId = QUuid::createUuid().toString(); const auto text = editor_->toPlainText();
+        records.append(QJsonObject{{"id", copyId}, {"title", QCoreApplication::translate("CrossDesk", "已删除记录的编辑副本")}, {"body", text}});
+        if (!store_.setRecords("notes", records)) return false;
+        selected_ = copyId; dirty_ = false; loadedBody_ = text; return true;
     }
     void refresh() {
         if (current().isEmpty()) selected_.clear();

@@ -9,6 +9,8 @@
 
 namespace crossdesk::desktop {
 
+enum class RestoreMode { ReplaceData, MergeRecords };
+
 // A Qt-native persistence model. Widget IDs survive reordering and restart.
 class Store final : public QObject {
     Q_OBJECT
@@ -29,7 +31,9 @@ public:
     QJsonObject settings() const { return state_["settings"].toObject(); }
     bool setSettings(const QJsonObject& settings);
     bool exportBackup(const QString& file, QString* error = nullptr) const;
+    // Restoring data never replaces this computer's settings or registrations.
     bool importBackup(const QString& file, QString* error = nullptr);
+    bool importBackup(const QString& file, RestoreMode mode, QString* error = nullptr);
     static bool validate(const QJsonObject& state, QString* error = nullptr);
 signals:
     void changed();

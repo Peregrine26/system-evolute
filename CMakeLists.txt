@@ -20,6 +20,7 @@ if(CROSSDESK_BUILD_GUI)
         src/desktop/record_pages.cpp src/desktop/record_actions.cpp
         src/desktop/search.cpp src/desktop/search_page.cpp
         src/desktop/appearance.cpp src/desktop/language.cpp
+        src/desktop/widget_layout.cpp
         src/desktop/utility_pages.cpp src/desktop/utility_data.cpp
         src/desktop/workbench.h src/desktop/workbench.cpp
     )
@@ -58,6 +59,15 @@ if(CROSSDESK_BUILD_GUI)
             add_test(NAME ${feature}_features_test COMMAND crossdesk_${feature}_features_test)
             set_tests_properties(${feature}_features_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;CROSSDESK_OFFLINE=1" TIMEOUT 30)
         endforeach()
+        foreach(policy widget_layout backup_policy navigation)
+            add_executable(crossdesk_${policy}_test tests/${policy}_test.cpp)
+            target_link_libraries(crossdesk_${policy}_test PRIVATE crossdesk_desktop)
+            if(MSVC)
+                target_compile_options(crossdesk_${policy}_test PRIVATE /utf-8)
+            endif()
+            add_test(NAME ${policy}_test COMMAND crossdesk_${policy}_test)
+            set_tests_properties(${policy}_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;CROSSDESK_OFFLINE=1" TIMEOUT 20)
+        endforeach()
         if(WIN32)
             add_test(NAME media_session_readonly COMMAND crossdesk_utility_features_test --media-readonly)
             set_tests_properties(media_session_readonly PROPERTIES LABELS "interactive-desktop" TIMEOUT 20)
@@ -91,6 +101,7 @@ if(CROSSDESK_BUILD_SCANNER)
     add_library(crossdesk_window_scanner_lib STATIC
         src/windows_window_scanner.cpp
         src/window_catalog.cpp
+        src/window_layout.cpp
         src/platform/layout_executor.cpp
     )
     target_link_libraries(crossdesk_window_scanner_lib PUBLIC crossdesk_window_api)
@@ -177,5 +188,16 @@ if(WIN32 AND CROSSDESK_BUILD_GUI AND CROSSDESK_BUILD_SCANNER)
         target_link_libraries(crossdesk_pid_filter_selftest PRIVATE crossdesk_desktop crossdesk_win32_backend crossdesk_window_scanner_lib)
         add_test(NAME pid_filter_selftest COMMAND crossdesk_pid_filter_selftest)
         set_tests_properties(pid_filter_selftest PROPERTIES LABELS "interactive-desktop" TIMEOUT 15)
+        add_executable(crossdesk_overview_flow_test tests/overview_flow_test.cpp)
+        target_link_libraries(crossdesk_overview_flow_test PRIVATE crossdesk_desktop crossdesk_window_scanner_lib)
+        if(MSVC)
+            target_compile_options(crossdesk_overview_flow_test PRIVATE /utf-8)
+        endif()
+        add_test(NAME overview_flow_test COMMAND crossdesk_overview_flow_test)
+        set_tests_properties(overview_flow_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;CROSSDESK_OFFLINE=1" TIMEOUT 20)
+        add_executable(crossdesk_window_workflow_selftest tests/window_workflow_selftest.cpp)
+        target_link_libraries(crossdesk_window_workflow_selftest PRIVATE crossdesk_desktop crossdesk_win32_backend crossdesk_window_scanner_lib)
+        add_test(NAME window_workflow_selftest COMMAND crossdesk_window_workflow_selftest)
+        set_tests_properties(window_workflow_selftest PROPERTIES LABELS "interactive-desktop" TIMEOUT 20)
     endif()
 endif()

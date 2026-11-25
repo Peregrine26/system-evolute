@@ -13,6 +13,9 @@ bool decode(const QKeySequence& sequence, unsigned& modifiers, unsigned& key) {
     if (sequence.count() != 1) return false;
     const auto combination = sequence[0]; const auto value = combination.key();
     const auto flags = combination.keyboardModifiers();
+    const bool functionKey = value >= Qt::Key_F1 && value <= Qt::Key_F24;
+    const int modifierCount = int(flags.testFlag(Qt::ControlModifier)) + int(flags.testFlag(Qt::AltModifier)) + int(flags.testFlag(Qt::ShiftModifier));
+    if (!functionKey && !flags.testFlag(Qt::MetaModifier) && modifierCount < 2) return false;
     modifiers = (flags.testFlag(Qt::ControlModifier) ? MOD_CONTROL : 0) |
         (flags.testFlag(Qt::AltModifier) ? MOD_ALT : 0) | (flags.testFlag(Qt::ShiftModifier) ? MOD_SHIFT : 0) |
         (flags.testFlag(Qt::MetaModifier) ? MOD_WIN : 0);
@@ -51,14 +54,15 @@ QStringList GlobalShortcuts::configure(const QMap<QString, QKeySequence>& bindin
         const auto label = sequence.toString(QKeySequence::NativeText);
         if (old != impl_->active.end() && old->label == label) { reports << label; continue; }
         unsigned modifiers = 0, key = 0;
-        if (!decode(sequence, modifiers, key)) { reports << label + QStringLiteral("：不支持此组合"); continue; }
+        if (!decode(sequence, modifiers, key)) { reports << label + QCoreApplication::translate("CrossDesk", "：不支持此组合") +
+            (old == impl_->active.end() ? QString{} : QCoreApplication::translate("CrossDesk", "，继续使用 ") + old->label); continue; }
         const int base = 0x5100 + i * 2;
         const int id = old != impl_->active.end() && old->id == base ? base + 1 : base;
         SetLastError(0);
         // Register using a second ID first: a conflict keeps the old binding.
         if (!RegisterHotKey(impl_->destination, id, modifiers | MOD_NOREPEAT, key)) {
-            reports << label + QStringLiteral("：被占用（%1）").arg(GetLastError()) +
-                (old == impl_->active.end() ? QString{} : QStringLiteral("，继续使用 ") + old->label);
+            reports << label + QCoreApplication::translate("CrossDesk", "：被占用（%1）").arg(GetLastError()) +
+                (old == impl_->active.end() ? QString{} : QCoreApplication::translate("CrossDesk", "，继续使用 ") + old->label);
             continue;
         }
         if (old != impl_->active.end()) UnregisterHotKey(impl_->destination, old->id);

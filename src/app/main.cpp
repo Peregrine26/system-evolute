@@ -31,6 +31,7 @@ int main(int argc, char* argv[]) {
     QCommandLineParser parser; parser.addHelpOption();
     parser.addOption({"data-dir", "Workspace directory", "directory"});
     parser.addOption({"background", "Start in system tray"});
+    parser.addOption({"desktop-tools", "Open desktop tools instead of the window overview"});
     parser.addOption({"smoke", "Run isolated desktop widget smoke test and exit"});
     parser.addOption({"quit-after", "Exit after milliseconds (for isolated validation)", "milliseconds"});
     parser.process(application);
@@ -49,7 +50,7 @@ int main(int argc, char* argv[]) {
     if (!lock.tryLock(0)) {
         QLocalSocket existing; existing.connectToServer(instanceName);
         if (existing.waitForConnected(1000)) {
-            existing.write(parser.isSet("background") ? "background\n" : "show\n");
+            existing.write(parser.isSet("background") ? "background\n" : parser.isSet("desktop-tools") ? "tools\n" : "show\n");
             existing.waitForBytesWritten(1000); return 0;
         }
         if (!smoke) QMessageBox::information(nullptr, QStringLiteral("CrossDesk"), QStringLiteral("该工作区已有实例，正在启动或暂时无响应，请稍后重试。"));
@@ -81,36 +82,50 @@ int main(int argc, char* argv[]) {
     QObject::connect(&server, &QLocalServer::newConnection, &window, [&server, &window] {
         while (auto* socket = server.nextPendingConnection()) {
             auto activate = [socket, &window] {
-                if (socket->readAll().contains("show")) { window.showNormal(); window.raise(); window.activateWindow(); }
+                if (!socket->canReadLine()) { if (socket->bytesAvailable() > 128) socket->disconnectFromServer(); return; }
+                const auto command = socket->readLine(129).trimmed();
+                if (command == "show") window.showPrimaryPanel();
+                else if (command == "tools") window.showDesktopTools();
                 socket->disconnectFromServer();
             };
             QObject::connect(socket, &QLocalSocket::readyRead, &window, activate);
             QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+            QTimer::singleShot(2000, socket, [socket] { socket->disconnectFromServer(); });
             if (socket->bytesAvailable()) activate();
         }
     });
 #ifdef CROSSDESK_WITH_WINDOW_API
     auto* overview = new crossdesk::desktop::WindowOverview(&window);
-    window.openWindowOverview = [overview] { overview->show(); overview->raise(); overview->activateWindow(); };
+    window.openWindowOverview = [&window, overview] { window.hide(); overview->showOverview(); };
+    window.toggleWindowOverview = [&window, overview] { if (!overview->isVisible() || overview->isMinimized()) window.hide(); overview->toggleOverview(); };
+    window.hideWindowOverview = [overview] { overview->hide(); };
+    overview->openDesktopTools = [&window] { window.showDesktopTools(); };
+    overview->closeRequested = [&window, overview] { window.closePanel(overview); };
+    window.reportShortcutStatus = [overview](const QString& message) { overview->setShortcutStatus(message); };
+    const auto overviewSettings = [&store, overview] { overview->setProperty("reducedMotion", store.settings()["reducedMotion"].toBool()); };
+    QObject::connect(&store, &crossdesk::desktop::Store::changed, overview, overviewSettings); overviewSettings();
 #endif
 #ifdef Q_OS_WIN
     crossdesk::desktop::GlobalShortcuts shortcuts(window);
     if (!smoke) {
         shortcuts.triggered = [&window](const QString& action) { window.shortcutAction(action); };
         auto previous = std::make_shared<QMap<QString, QKeySequence>>();
-        auto configure = [&window, &store, &shortcuts, previous] {
+        auto configure = [&window, &store, &shortcuts, previous](bool force) {
             const auto settings = store.settings(); QMap<QString, QKeySequence> bindings;
             bindings["overview"] = QKeySequence(settings["shortcut_overview"].toString("Ctrl+Alt+M"));
             bindings["widgets"] = QKeySequence(settings["shortcut_widgets"].toString("F7"));
             bindings["note"] = QKeySequence(settings["shortcut_note"].toString("Ctrl+Alt+N"));
             bindings["search"] = QKeySequence(settings["shortcut_search"].toString("Ctrl+Alt+F"));
-            if (*previous == bindings) return; *previous = bindings;
+            if (!force && *previous == bindings) return; *previous = bindings;
             window.setShortcutStatus(shortcuts.configure(bindings).join(QStringLiteral(" · ")));
         };
-        QObject::connect(&store, &crossdesk::desktop::Store::changed, &shortcuts, configure); configure();
+        QObject::connect(&store, &crossdesk::desktop::Store::changed, &shortcuts, [configure] { configure(false); });
+        window.retryShortcuts = [configure] { configure(true); }; configure(false);
     }
 #endif
-    if (!parser.isSet("background") || !QSystemTrayIcon::isSystemTrayAvailable()) window.show();
+    if (!parser.isSet("background") || !QSystemTrayIcon::isSystemTrayAvailable()) {
+        if (smoke || parser.isSet("desktop-tools")) window.showDesktopTools(); else window.showPrimaryPanel();
+    }
     if (smoke) QTimer::singleShot(1500, &application, &QApplication::quit);
     else if (parser.isSet("quit-after")) {
         bool ok = false; const auto delay = parser.value("quit-after").toInt(&ok);
