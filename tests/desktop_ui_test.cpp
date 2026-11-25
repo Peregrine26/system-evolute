@@ -16,6 +16,7 @@
 #include <QPushButton>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QSortFilterProxyModel>
 #include <iostream>
 #include <memory>
 
@@ -89,12 +90,14 @@ int main(int argc, char** argv) {
     const auto folderId = store.addWidget("folder", "mapped", {{"path", folder}});
     std::unique_ptr<QWidget> files(createPage(store, folderId, notify));
     auto* view = files->findChild<QListView*>("folderView");
-    auto* model = qobject_cast<QFileSystemModel*>(view->model());
+    auto* model = files->findChild<QFileSystemModel*>("folderFileModel");
+    auto* proxy = qobject_cast<QSortFilterProxyModel*>(view->model());
+    auto visibleIndex = [proxy, model](const QString& path) { return proxy ? proxy->mapFromSource(model->index(path)) : model->index(path); };
     QMimeData drop; drop.setUrls({QUrl::fromLocalFile(source)});
     ok &= check(model->dropMimeData(&drop, Qt::CopyAction, -1, 0, model->index(folder)) && QFile::exists(source) && QFile::exists(folder + "/drag.txt"),
                 "file widget drag/drop did not copy into the mapped folder");
     ok &= check(!model->dropMimeData(&drop, Qt::CopyAction, -1, 0, model->index(folder)), "drag/drop replaced an existing file");
-    QMetaObject::invokeMethod(view, "doubleClicked", Qt::DirectConnection, Q_ARG(QModelIndex, model->index(folder + "/child")));
+    QMetaObject::invokeMethod(view, "doubleClicked", Qt::DirectConnection, Q_ARG(QModelIndex, visibleIndex(folder + "/child")));
     ok &= check(store.widget(folderId)["data"].toObject()["path"].toString() == folder, "browsing a child changed the mapped root");
     const auto other = root.path() + "/other"; QDir().mkpath(other);
     auto* mapped = files->findChild<QLineEdit*>("folderPath"); mapped->setText(other);

@@ -130,44 +130,8 @@ bool setAutoStart(bool enabled, const QString& executable, QString* error) {
         if (!enabled && result == ERROR_FILE_NOT_FOUND) result = ERROR_SUCCESS;
         RegCloseKey(key);
     }
-    if (result != ERROR_SUCCESS && error) *error = QStringLiteral("开机启动设置失败（%1）").arg(result);
+    if (result != ERROR_SUCCESS && error) *error = QCoreApplication::translate("CrossDesk", "开机启动设置失败（%1）").arg(result);
     return result == ERROR_SUCCESS;
-}
-QStringList everythingSearch(const QString& query, QString* error) {
-    // Everything's SDK owns process-global query state; serialize worker queries.
-    static QMutex mutex;
-    QMutexLocker lock(&mutex);
-    QLibrary library(QCoreApplication::applicationDirPath() + "/EverythingSdk.dll");
-    if (!library.load()) {
-        if (error) *error = QStringLiteral("未找到 Everything 接口，将搜索已映射的文件夹");
-        return {};
-    }
-    using SetSearch = void (WINAPI*)(const wchar_t*);
-    using SetFlags = void (WINAPI*)(DWORD);
-    using SetMax = void (WINAPI*)(DWORD);
-    using Query = BOOL (WINAPI*)(BOOL);
-    using Count = DWORD (WINAPI*)();
-    using GetPath = DWORD (WINAPI*)(DWORD, wchar_t*, DWORD);
-    auto search = reinterpret_cast<SetSearch>(library.resolve("Everything_SetSearchW"));
-    auto flags = reinterpret_cast<SetFlags>(library.resolve("Everything_SetRequestFlags"));
-    auto maximum = reinterpret_cast<SetMax>(library.resolve("Everything_SetMax"));
-    auto execute = reinterpret_cast<Query>(library.resolve("Everything_QueryW"));
-    auto count = reinterpret_cast<Count>(library.resolve("Everything_GetNumResults"));
-    auto path = reinterpret_cast<GetPath>(library.resolve("Everything_GetResultFullPathNameW"));
-    if (!search || !flags || !maximum || !execute || !count || !path) {
-        if (error) *error = QStringLiteral("Everything 接口版本不兼容");
-        return {};
-    }
-    const auto text = query.toStdWString();
-    search(text.c_str()); flags(1 | 2); maximum(500);
-    if (!execute(TRUE)) {
-        if (error) *error = QStringLiteral("Everything 未运行或无法连接，将搜索已映射的文件夹");
-        return {};
-    }
-    QStringList results;
-    wchar_t buffer[32768]{};
-    for (DWORD i = 0; i < count(); ++i) if (path(i, buffer, 32768)) results << QString::fromWCharArray(buffer);
-    return results;
 }
 QString lunarDate(const QDate& date) {
     // Windows 10+ ships ICU; query its Chinese calendar without a second runtime.
@@ -189,15 +153,15 @@ QString lunarDate(const QDate& date) {
     const int day = get(calendar, 5, &error);
     const bool leap = get(calendar, 22, &error) != 0; close(calendar);
     if (error > 0 || month < 1 || month > 12 || day < 1 || day > 30) return {};
-    const QStringList months{QStringLiteral("正"), QStringLiteral("二"), QStringLiteral("三"), QStringLiteral("四"),
-        QStringLiteral("五"), QStringLiteral("六"), QStringLiteral("七"), QStringLiteral("八"), QStringLiteral("九"),
-        QStringLiteral("十"), QStringLiteral("冬"), QStringLiteral("腊")};
-    const QString digits = QStringLiteral("一二三四五六七八九十"); QString dayName;
-    if (day <= 10) dayName = QStringLiteral("初") + digits[day - 1];
-    else if (day < 20) dayName = QStringLiteral("十") + digits[day - 11];
-    else if (day == 20) dayName = QStringLiteral("二十");
-    else if (day < 30) dayName = QStringLiteral("廿") + digits[day - 21];
-    else dayName = QStringLiteral("三十");
-    return QStringLiteral("农历 ") + (leap ? QStringLiteral("闰") : QString{}) + months[month - 1] + QStringLiteral("月") + dayName;
+    const QStringList months{QCoreApplication::translate("CrossDesk", "正"), QCoreApplication::translate("CrossDesk", "二"), QCoreApplication::translate("CrossDesk", "三"), QCoreApplication::translate("CrossDesk", "四"),
+        QCoreApplication::translate("CrossDesk", "五"), QCoreApplication::translate("CrossDesk", "六"), QCoreApplication::translate("CrossDesk", "七"), QCoreApplication::translate("CrossDesk", "八"), QCoreApplication::translate("CrossDesk", "九"),
+        QCoreApplication::translate("CrossDesk", "十"), QCoreApplication::translate("CrossDesk", "冬"), QCoreApplication::translate("CrossDesk", "腊")};
+    const QString digits = QCoreApplication::translate("CrossDesk", "一二三四五六七八九十"); QString dayName;
+    if (day <= 10) dayName = QCoreApplication::translate("CrossDesk", "初") + digits[day - 1];
+    else if (day < 20) dayName = QCoreApplication::translate("CrossDesk", "十") + digits[day - 11];
+    else if (day == 20) dayName = QCoreApplication::translate("CrossDesk", "二十");
+    else if (day < 30) dayName = QCoreApplication::translate("CrossDesk", "廿") + digits[day - 21];
+    else dayName = QCoreApplication::translate("CrossDesk", "三十");
+    return QCoreApplication::translate("CrossDesk", "农历 ") + (leap ? QCoreApplication::translate("CrossDesk", "闰") : QString{}) + months[month - 1] + QCoreApplication::translate("CrossDesk", "月") + dayName;
 }
 } // namespace crossdesk::desktop

@@ -1,6 +1,8 @@
+#include <QCoreApplication>
 #include "desktop/workbench.h"
 #include "desktop/pages.h"
 #include "desktop/shell.h"
+#include "desktop/appearance.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -26,6 +28,8 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPropertyAnimation>
+#include <QPainter>
+#include <QPixmapCache>
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollArea>
@@ -64,14 +68,16 @@ public:
         : QWidget(nullptr, Qt::Tool), store_(store), ids_(ids) {
         setObjectName("desktopWidget");
         const auto config = store_.widget(ids_.first());
-        setWindowTitle(ids_.size() > 1 ? QStringLiteral("格子组") : config["title"].toString());
+        setWindowTitle(ids_.size() > 1 ? QCoreApplication::translate("CrossDesk", "格子组") : config["title"].toString());
         setMinimumSize(240, 150);
         auto* layout = new QVBoxLayout(this); layout->setContentsMargins(8, 8, 8, 8);
         auto* tools = new QHBoxLayout;
         auto* title = new QLabel(windowTitle()); title->setTextInteractionFlags(Qt::TextSelectableByMouse); tools->addWidget(title, 1);
-        collapse_ = new QToolButton; collapse_->setText(QStringLiteral("收起")); tools->addWidget(collapse_);
-        auto* pin = new QToolButton; pin->setText(QStringLiteral("置顶")); pin->setCheckable(true); pin->setChecked(config["pinned"].toBool()); tools->addWidget(pin);
-        auto* rename = new QToolButton; rename->setText(QStringLiteral("名称")); tools->addWidget(rename); layout->addLayout(tools);
+        collapse_ = new QToolButton; collapse_->setText(QCoreApplication::translate("CrossDesk", "收起")); tools->addWidget(collapse_);
+        auto* pin = new QToolButton; pin->setText(QCoreApplication::translate("CrossDesk", "置顶")); pin->setCheckable(true); pin->setChecked(config["pinned"].toBool()); tools->addWidget(pin);
+        auto* rename = new QToolButton; rename->setText(QCoreApplication::translate("CrossDesk", "名称")); tools->addWidget(rename); layout->addLayout(tools);
+        auto* appearance = new QToolButton; appearance->setText(QCoreApplication::translate("CrossDesk", "外观")); tools->addWidget(appearance);
+        connect(appearance, &QToolButton::clicked, this, [this] { if (editAppearance(store_, this, ids_.first())) updateAppearance(); });
         auto* feedback = new QLabel(this); feedback->setWordWrap(true);
         const auto pageNotify = [feedback, notify](const QString& message) { feedback->setText(message); notify(message); };
         if (ids_.size() > 1) {
@@ -94,7 +100,7 @@ public:
             auto config = store_.widget(ids_.first()); config["pinned"] = enabled; store_.putWidget(config);
         });
         connect(rename, &QToolButton::clicked, this, [this, title] {
-            bool ok = false; const auto text = QInputDialog::getText(this, QStringLiteral("格子名称"), QStringLiteral("名称"), QLineEdit::Normal, windowTitle(), &ok);
+            bool ok = false; const auto text = QInputDialog::getText(this, QCoreApplication::translate("CrossDesk", "格子名称"), QCoreApplication::translate("CrossDesk", "名称"), QLineEdit::Normal, windowTitle(), &ok);
             if (!ok || text.trimmed().isEmpty()) return;
             setWindowTitle(text.trimmed()); title->setText(windowTitle());
             auto config = store_.widget(ids_.first()); config["title"] = windowTitle(); store_.putWidget(config);
@@ -102,6 +108,12 @@ public:
         saveTimer_.setSingleShot(true); saveTimer_.setInterval(250);
         connect(&saveTimer_, &QTimer::timeout, this, [this] { persist(); });
         ready_ = true;
+        updateAppearance();
+        cacheTimer_.setInterval(10000);
+        connect(&cacheTimer_, &QTimer::timeout, this, [this] {
+            const int seconds = store_.settings()["cacheIdleSeconds"].toInt(120);
+            if (!isVisible() && seconds > 0 && hiddenAt_.isValid() && hiddenAt_.secsTo(QDateTime::currentDateTime()) >= seconds) image_ = {};
+        }); cacheTimer_.start();
     }
     ~WidgetFrame() override { ready_ = false; saveTimer_.stop(); persist(); }
     void setShuttingDown() { shuttingDown_ = true; }
@@ -120,7 +132,20 @@ public:
         return false;
     }
     void updateOpacity(double opacity) { setWindowOpacity(std::clamp(opacity, 0.35, 1.0)); }
+    void updateAppearance() {
+        appearance_ = effectiveAppearance(store_, ids_.first()); image_ = appearanceImage(appearance_);
+        QString style = appearanceStyle(appearance_, "#desktopWidget, #desktopWidget QWidget");
+        if (!image_.isNull()) style += "#desktopWidget QWidget {background:transparent;} #desktopWidget QLineEdit,#desktopWidget QListView,#desktopWidget QPlainTextEdit,#desktopWidget QTextBrowser,#desktopWidget QTreeWidget {background:rgba(255,255,255,190);color:#273936;}";
+        setStyleSheet(style);
+        const auto icon = appearance_["icon"].toString();
+        if (QFileInfo::exists(icon)) setWindowIcon(QIcon(icon));
+        else if (!icon.isEmpty()) { QPixmap pixmap(48, 48); pixmap.fill(Qt::transparent); QPainter p(&pixmap); QFont font = p.font(); font.setPixelSize(32); p.setFont(font); p.drawText(pixmap.rect(), Qt::AlignCenter, icon.left(8)); p.end(); setWindowIcon(QIcon(pixmap)); }
+        update();
+    }
 protected:
+    void paintEvent(QPaintEvent* event) override { QWidget::paintEvent(event); QPainter painter(this); paintAppearance(painter, rect(), appearance_, image_); }
+    void hideEvent(QHideEvent* event) override { hiddenAt_ = QDateTime::currentDateTime(); QWidget::hideEvent(event); }
+    void showEvent(QShowEvent* event) override { QWidget::showEvent(event); if (image_.isNull() && !appearance_["background"].toString().isEmpty()) { image_ = appearanceImage(appearance_); update(); } }
     void resizeEvent(QResizeEvent* event) override { QWidget::resizeEvent(event); if (ready_) saveTimer_.start(); }
     void moveEvent(QMoveEvent* event) override { QWidget::moveEvent(event); if (ready_) saveTimer_.start(); }
     void closeEvent(QCloseEvent* event) override {
@@ -146,11 +171,11 @@ private:
     void applyCollapsed(bool animate) {
         const bool small = collapsed_ && !hoverExpanded_;
         if (small && body_->isVisible()) expandedHeight_ = height();
-        body_->setVisible(!small); collapse_->setText(small ? QStringLiteral("展开") : QStringLiteral("收起"));
+        body_->setVisible(!small); collapse_->setText(small ? QCoreApplication::translate("CrossDesk", "展开") : QCoreApplication::translate("CrossDesk", "收起"));
         setMinimumHeight(small ? 48 : 150);
         const QRect target(x(), y(), width(), small ? 52 : qMax(150, expandedHeight_));
         animation_.stop();
-        if (animate) {
+        if (animate && !store_.settings()["reducedMotion"].toBool()) {
             animation_.setTargetObject(this); animation_.setPropertyName("geometry");
             animation_.setStartValue(geometry()); animation_.setEndValue(target);
             animation_.setDuration(150); animation_.setEasingCurve(QEasingCurve::OutCubic); animation_.start();
@@ -166,6 +191,8 @@ private:
         store_.putWidget(config);
     }
     Store& store_; QStringList ids_; QWidget* body_; QToolButton* collapse_;
+    QJsonObject appearance_; QImage image_;
+    QTimer cacheTimer_; QDateTime hiddenAt_;
     QTimer saveTimer_; QPropertyAnimation animation_; bool collapsed_ = false;
     bool hoverExpanded_ = false; bool ready_ = false; bool shuttingDown_ = false; int expandedHeight_ = 320;
 };
@@ -173,7 +200,7 @@ private:
 Workbench::Workbench(Store& store, QWidget* parent) : QMainWindow(parent), store_(store) {
     setWindowTitle(QStringLiteral("CrossDesk")); resize(920, 660); setMinimumSize(680, 480);
     auto* body = new QWidget; auto* layout = new QVBoxLayout(body); layout->setContentsMargins(28, 24, 28, 20); layout->setSpacing(16);
-    auto* heading = new QLabel(QStringLiteral("让桌面各归其位")); heading->setStyleSheet("font-size:28px;font-weight:600;"); layout->addWidget(heading);
+    auto* heading = new QLabel(QCoreApplication::translate("CrossDesk", "让桌面各归其位")); heading->setStyleSheet("font-size:28px;font-weight:600;"); layout->addWidget(heading);
     summary_ = new QLabel; layout->addWidget(summary_);
     auto* createRow = new QHBoxLayout;
     for (const auto* kind : {"folder", "todo", "note", "clock", "weather", "music", "search"}) {
@@ -186,41 +213,43 @@ Workbench::Workbench(Store& store, QWidget* parent) : QMainWindow(parent), store
     auto addAction = [this, tools](const QString& title, const std::function<void()>& action) {
         auto* button = new QPushButton(title); tools->addWidget(button); connect(button, &QPushButton::clicked, this, action);
     };
-    addAction(QStringLiteral("显示所选"), [this] { showSelected(); });
-    addAction(QStringLiteral("合成标签组"), [this] { groupSelected(true); });
-    addAction(QStringLiteral("拆分标签组"), [this] { groupSelected(false); });
-    addAction(QStringLiteral("删除格子"), [this] {
+    addAction(QCoreApplication::translate("CrossDesk", "显示所选"), [this] { showSelected(); });
+    addAction(QCoreApplication::translate("CrossDesk", "合成标签组"), [this] { groupSelected(true); });
+    addAction(QCoreApplication::translate("CrossDesk", "拆分标签组"), [this] { groupSelected(false); });
+    addAction(QCoreApplication::translate("CrossDesk", "删除格子"), [this] {
         const auto ids = selectedIds(); if (ids.isEmpty()) return;
-        if (QMessageBox::question(this, QStringLiteral("删除格子"), QStringLiteral("只移除格子，文件和待办随记仍保留。继续？")) != QMessageBox::Yes) return;
+        if (QMessageBox::question(this, QCoreApplication::translate("CrossDesk", "删除格子"), QCoreApplication::translate("CrossDesk", "只移除格子，文件和待办随记仍保留。继续？")) != QMessageBox::Yes) return;
         for (const auto& id : ids) store_.removeWidget(id); rebuildFrames();
     });
-    tools->addStretch(); addAction(QStringLiteral("窗口总览"), [this] { if (openWindowOverview) openWindowOverview(); else notify(QStringLiteral("当前构建未启用窗口总览")); });
+    tools->addStretch(); addAction(QCoreApplication::translate("CrossDesk", "窗口总览"), [this] { if (openWindowOverview) openWindowOverview(); else notify(QCoreApplication::translate("CrossDesk", "当前构建未启用窗口总览")); });
     layout->addLayout(tools); shortcut_ = new QLabel; shortcut_->setWordWrap(true); layout->addWidget(shortcut_); setCentralWidget(body);
-    auto* file = menuBar()->addMenu(QStringLiteral("桌面"));
-    file->addAction(QStringLiteral("显示全部格子"), this, [this] {
+    auto* file = menuBar()->addMenu(QCoreApplication::translate("CrossDesk", "桌面"));
+    file->addAction(QCoreApplication::translate("CrossDesk", "显示全部格子"), this, [this] {
         for (const auto& value : store_.widgets()) { auto config = value.toObject(); config["hidden"] = false; store_.putWidget(config); }
         rebuildFrames();
     });
-    file->addAction(QStringLiteral("收起 / 显示所有格子"), this, [this] {
+    file->addAction(QCoreApplication::translate("CrossDesk", "收起 / 显示所有格子"), this, [this] {
         bool anyVisible = false; for (const auto& frame : frames_) if (frame && frame->isVisible()) anyVisible = true;
         for (const auto& frame : frames_) if (frame) frame->setVisible(!anyVisible);
     });
-    file->addAction(QStringLiteral("整理文件夹…"), this, [this] { organize(); });
-    file->addAction(QStringLiteral("撤销上次文件移动"), this, [this] { undoOrganization(); });
-    file->addSeparator(); file->addAction(QStringLiteral("退出"), this, [this] { quitting_ = true; qApp->quit(); });
-    auto* settings = menuBar()->addMenu(QStringLiteral("设置与备份"));
-    settings->addAction(QStringLiteral("偏好设置"), this, [this] { preferences(); });
-    settings->addAction(QStringLiteral("导出备份…"), this, [this] {
+    file->addAction(QCoreApplication::translate("CrossDesk", "整理文件夹…"), this, [this] { organize(); });
+    file->addAction(QCoreApplication::translate("CrossDesk", "撤销上次文件移动"), this, [this] { undoOrganization(); });
+    file->addSeparator(); file->addAction(QCoreApplication::translate("CrossDesk", "退出"), this, [this] { quitting_ = true; qApp->quit(); });
+    auto* settings = menuBar()->addMenu(QCoreApplication::translate("CrossDesk", "设置与备份"));
+    settings->addAction(QCoreApplication::translate("CrossDesk", "偏好设置"), this, [this] { preferences(); });
+    settings->addAction(QCoreApplication::translate("CrossDesk", "字体、配色与背景"), this, [this] { if (editAppearance(store_, this)) { applyTheme(); for (const auto& frame : frames_) if (frame) frame->updateAppearance(); } });
+    settings->addAction(QCoreApplication::translate("CrossDesk", "性能与诊断"), this, [this] { showMaintenance(store_, this); });
+    settings->addAction(QCoreApplication::translate("CrossDesk", "导出备份…"), this, [this] {
         for (const auto& frame : frames_) if (frame) flushPages(frame);
-        const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("导出配置备份"), "CrossDesk-backup.json", "JSON (*.json)");
-        if (path.isEmpty()) return; QString error; notify(store_.exportBackup(path, &error) ? QStringLiteral("备份已导出") : error);
+        const auto path = QFileDialog::getSaveFileName(this, QCoreApplication::translate("CrossDesk", "导出配置备份"), "CrossDesk-backup.json", "JSON (*.json)");
+        if (path.isEmpty()) return; QString error; notify(store_.exportBackup(path, &error) ? QCoreApplication::translate("CrossDesk", "备份已导出") : error);
     });
-    settings->addAction(QStringLiteral("恢复备份…"), this, [this] { importBackup(); });
-    settings->addAction(QStringLiteral("打开数据目录"), this, [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(store_.directory())); });
+    settings->addAction(QCoreApplication::translate("CrossDesk", "恢复备份…"), this, [this] { importBackup(); });
+    settings->addAction(QCoreApplication::translate("CrossDesk", "打开数据目录"), this, [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(store_.directory())); });
     tray_.setIcon(style()->standardIcon(QStyle::SP_ComputerIcon)); tray_.setToolTip(QStringLiteral("CrossDesk"));
-    auto* trayMenu = new QMenu(this); trayMenu->addAction(QStringLiteral("打开总览"), this, [this] { showNormal(); raise(); activateWindow(); });
-    trayMenu->addAction(QStringLiteral("显示全部格子"), this, [this] { for (const auto& frame : frames_) if (frame) frame->show(); });
-    trayMenu->addAction(QStringLiteral("退出"), this, [this] { quitting_ = true; qApp->quit(); }); tray_.setContextMenu(trayMenu);
+    auto* trayMenu = new QMenu(this); trayMenu->addAction(QCoreApplication::translate("CrossDesk", "打开总览"), this, [this] { showNormal(); raise(); activateWindow(); });
+    trayMenu->addAction(QCoreApplication::translate("CrossDesk", "显示全部格子"), this, [this] { for (const auto& frame : frames_) if (frame) frame->show(); });
+    trayMenu->addAction(QCoreApplication::translate("CrossDesk", "退出"), this, [this] { quitting_ = true; qApp->quit(); }); tray_.setContextMenu(trayMenu);
     connect(&tray_, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) toggleOverview();
     });
@@ -268,16 +297,16 @@ void Workbench::refreshList() {
     for (const auto& value : store_.widgets()) {
         const auto config = value.toObject();
         auto* row = new QListWidgetItem(config["title"].toString() + "   ·   " + kindTitle(config["kind"].toString()) +
-            (config["group"].toString().isEmpty() ? QString{} : QStringLiteral("   ·   标签组")), list_);
+            (config["group"].toString().isEmpty() ? QString{} : QCoreApplication::translate("CrossDesk", "   ·   标签组")), list_);
         row->setData(Qt::UserRole, config["id"].toString()); row->setSelected(selected.contains(config["id"].toString()));
         row->setToolTip(config["data"].toObject()["path"].toString());
     }
-    summary_->setText(QStringLiteral("%1 个格子 · %2 条待办 · %3 篇随记").arg(store_.widgets().size()).arg(store_.records("todos").size()).arg(store_.records("notes").size()));
+    summary_->setText(QCoreApplication::translate("CrossDesk", "%1 个格子 · %2 条待办 · %3 篇随记").arg(store_.widgets().size()).arg(store_.records("todos").size()).arg(store_.records("notes").size()));
 }
 void Workbench::create(const QString& kind) {
     QJsonObject data;
     if (kind == "folder") {
-        const auto path = QFileDialog::getExistingDirectory(this, QStringLiteral("选择要映射的文件夹")); if (path.isEmpty()) return; data["path"] = path;
+        const auto path = QFileDialog::getExistingDirectory(this, QCoreApplication::translate("CrossDesk", "选择要映射的文件夹")); if (path.isEmpty()) return; data["path"] = path;
     }
     if (!store_.addWidget(kind, kindTitle(kind), data).isEmpty()) rebuildFrames();
 }
@@ -300,25 +329,26 @@ void Workbench::showSelected() {
     rebuildFrames();
 }
 void Workbench::groupSelected(bool group) {
-    const auto ids = selectedIds(); if (ids.isEmpty() || (group && ids.size() < 2)) { notify(QStringLiteral("合组时请至少选择两个格子")); return; }
+    const auto ids = selectedIds(); if (ids.isEmpty() || (group && ids.size() < 2)) { notify(QCoreApplication::translate("CrossDesk", "合组时请至少选择两个格子")); return; }
     const auto groupId = group ? QUuid::createUuid().toString() : QString{};
     for (const auto& id : ids) { auto config = store_.widget(id); config["group"] = groupId; config["hidden"] = false; store_.putWidget(config); }
     rebuildFrames();
 }
 void Workbench::preferences() {
-    QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("偏好设置")); auto* layout = new QFormLayout(&dialog);
+    QDialog dialog(this); dialog.setWindowTitle(QCoreApplication::translate("CrossDesk", "偏好设置")); auto* layout = new QFormLayout(&dialog);
     auto settings = store_.settings(); auto* theme = new QComboBox;
-    theme->addItems({QStringLiteral("浅色"), QStringLiteral("深色")}); theme->setCurrentIndex(settings["dark"].toBool() ? 1 : 0); layout->addRow(QStringLiteral("外观"), theme);
-    auto* opacity = new QSlider(Qt::Horizontal); opacity->setRange(35, 100); opacity->setValue(qRound(settings["opacity"].toDouble(1.0) * 100)); layout->addRow(QStringLiteral("格子不透明度"), opacity);
-    auto* hover = new QCheckBox(QStringLiteral("悬停展开收起的格子")); hover->setChecked(settings["hoverReveal"].toBool()); layout->addRow(hover);
-    auto* tray = new QCheckBox(QStringLiteral("关闭总览时保留托盘")); tray->setChecked(settings["closeToTray"].toBool(true)); layout->addRow(tray);
-    auto* autoStart = new QCheckBox(QStringLiteral("登录 Windows 时启动")); autoStart->setChecked(settings["autoStart"].toBool()); layout->addRow(autoStart);
+    theme->addItems({QCoreApplication::translate("CrossDesk", "浅色"), QCoreApplication::translate("CrossDesk", "深色")}); theme->setCurrentIndex(settings["dark"].toBool() ? 1 : 0); layout->addRow(QCoreApplication::translate("CrossDesk", "外观"), theme);
+    auto* language = new QComboBox; language->addItem(QCoreApplication::translate("CrossDesk", "简体中文"), "zh_CN"); language->addItem("English", "en"); language->setCurrentIndex(qMax(0, language->findData(settings["language"].toString("zh_CN")))); layout->addRow(QCoreApplication::translate("CrossDesk", "语言（重启生效）"), language);
+    auto* opacity = new QSlider(Qt::Horizontal); opacity->setRange(35, 100); opacity->setValue(qRound(settings["opacity"].toDouble(1.0) * 100)); layout->addRow(QCoreApplication::translate("CrossDesk", "格子不透明度"), opacity);
+    auto* hover = new QCheckBox(QCoreApplication::translate("CrossDesk", "悬停展开收起的格子")); hover->setChecked(settings["hoverReveal"].toBool()); layout->addRow(hover);
+    auto* tray = new QCheckBox(QCoreApplication::translate("CrossDesk", "关闭总览时保留托盘")); tray->setChecked(settings["closeToTray"].toBool(true)); layout->addRow(tray);
+    auto* autoStart = new QCheckBox(QCoreApplication::translate("CrossDesk", "登录 Windows 时启动")); autoStart->setChecked(settings["autoStart"].toBool()); layout->addRow(autoStart);
     QMap<QString, QKeySequenceEdit*> shortcuts;
     for (const auto& item : {qMakePair(QString("overview"), QString("Ctrl+Alt+M")), qMakePair(QString("widgets"), QString("F7")),
                             qMakePair(QString("note"), QString("Ctrl+Alt+N")), qMakePair(QString("search"), QString("Ctrl+Alt+F"))}) {
         auto* edit = new QKeySequenceEdit(QKeySequence(settings["shortcut_" + item.first].toString(item.second)));
-        const QMap<QString, QString> labels{{"overview", QStringLiteral("总览快捷键")}, {"widgets", QStringLiteral("格子快捷键")},
-            {"note", QStringLiteral("随记快捷键")}, {"search", QStringLiteral("搜索快捷键")}};
+        const QMap<QString, QString> labels{{"overview", QCoreApplication::translate("CrossDesk", "总览快捷键")}, {"widgets", QCoreApplication::translate("CrossDesk", "格子快捷键")},
+            {"note", QCoreApplication::translate("CrossDesk", "随记快捷键")}, {"search", QCoreApplication::translate("CrossDesk", "搜索快捷键")}};
         layout->addRow(labels.value(item.first), edit); shortcuts[item.first] = edit;
     }
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); layout->addRow(buttons);
@@ -328,6 +358,7 @@ void Workbench::preferences() {
         QString error; if (!setAutoStart(autoStart->isChecked(), QCoreApplication::applicationFilePath(), &error)) { notify(error); return; }
     }
     settings["dark"] = theme->currentIndex() == 1; settings["opacity"] = opacity->value() / 100.0;
+    settings["language"] = language->currentData().toString();
     settings["hoverReveal"] = hover->isChecked(); settings["closeToTray"] = tray->isChecked(); settings["autoStart"] = autoStart->isChecked();
     for (auto it = shortcuts.cbegin(); it != shortcuts.cend(); ++it) settings["shortcut_" + it.key()] = it.value()->keySequence().toString(QKeySequence::PortableText);
     if (store_.setSettings(settings)) { applyTheme(); for (const auto& frame : frames_) if (frame) frame->updateOpacity(opacity->value() / 100.0); }
@@ -342,11 +373,15 @@ void Workbench::applyTheme() {
         "QPushButton:hover,QToolButton:hover { border-color:#478b79; }"
         "QLineEdit,QPlainTextEdit,QTextBrowser,QListView,QListWidget { background:%3; border:1px solid %4; border-radius:6px; padding:6px; }"
         "QListWidget::item { padding:9px; } QListWidget::item:selected { background:#347c68; color:white; }"
+        "QCheckBox::indicator,QListView::indicator,QTreeView::indicator {width:16px;height:16px;border:1px solid %4;border-radius:3px;background:%3;}"
+        "QCheckBox::indicator:checked,QListView::indicator:checked,QTreeView::indicator:checked {background:#347c68;border:2px solid #21604f;}"
+        "QListWidget::indicator {margin-right:6px;}"
         "QMenuBar,QMenu,QStatusBar { background:%2; }")
-        .arg(foreground, background, surface, dark ? "#45504e" : "#d6dfda"));
+        .arg(foreground, background, surface, dark ? "#45504e" : "#d6dfda") + appearanceStyle(effectiveAppearance(store_), "QWidget"));
+    QPixmapCache::setCacheLimit(std::clamp(store_.settings()["cacheLimitMB"].toInt(32), 8, 256) * 1024);
 }
 void Workbench::organize() {
-    const auto folder = QFileDialog::getExistingDirectory(this, QStringLiteral("选择要整理的文件夹")); if (folder.isEmpty()) return;
+    const auto folder = QFileDialog::getExistingDirectory(this, QCoreApplication::translate("CrossDesk", "选择要整理的文件夹")); if (folder.isEmpty()) return;
     organizeFolder(store_, folder, this, [this](const QString& message) { notify(message); });
 }
 void Workbench::undoOrganization() {
@@ -354,30 +389,30 @@ void Workbench::undoOrganization() {
     for (int i = operations.size() - 1; i >= 0; --i) {
         auto operation = operations[i].toObject(); if (operation["undone"].toBool()) continue;
         const auto result = movePath(operation["destination"].toString(), operation["source"].toString());
-        if (result.ok) { operation["undone"] = true; operations[i] = operation; store_.setRecords("operations", operations); notify(QStringLiteral("已撤销一次文件移动")); }
+        if (result.ok) { operation["undone"] = true; operations[i] = operation; store_.setRecords("operations", operations); notify(QCoreApplication::translate("CrossDesk", "已撤销一次文件移动")); }
         else notify(result.error); return;
     }
-    notify(QStringLiteral("没有可撤销的文件移动"));
+    notify(QCoreApplication::translate("CrossDesk", "没有可撤销的文件移动"));
 }
 void Workbench::importBackup() {
-    const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("恢复配置备份"), {}, "JSON (*.json)"); if (path.isEmpty()) return;
-    if (QMessageBox::question(this, QStringLiteral("恢复配置"), QStringLiteral("将用备份替换当前格子和记录，旧配置保存在自动备份中。继续？")) != QMessageBox::Yes) return;
+    const auto path = QFileDialog::getOpenFileName(this, QCoreApplication::translate("CrossDesk", "恢复配置备份"), {}, "JSON (*.json)"); if (path.isEmpty()) return;
+    if (QMessageBox::question(this, QCoreApplication::translate("CrossDesk", "恢复配置"), QCoreApplication::translate("CrossDesk", "将用备份替换当前格子和记录，旧配置保存在自动备份中。继续？")) != QMessageBox::Yes) return;
     // Flush editors and release frames before replacing their backing records.
     for (const auto& frame : frames_) if (frame) { frame->setShuttingDown(); delete frame; } frames_.clear();
-    QString error; const bool ok = store_.importBackup(path, &error); applyTheme(); rebuildFrames(); notify(ok ? QStringLiteral("配置已恢复") : error);
+    QString error; const bool ok = store_.importBackup(path, &error); applyTheme(); rebuildFrames(); notify(ok ? QCoreApplication::translate("CrossDesk", "配置已恢复") : error);
 }
 void Workbench::reminders() {
     const auto candidates = dueReminders(store_.records("todos"), QDateTime::currentDateTime(), notified_);
     if (candidates.isEmpty()) return;
     QStringList titles;
     for (const auto& reminder : candidates) { notified_.insert(reminder.key); titles << reminder.title; }
-    const auto message = titles.mid(0, 5).join('\n') + (titles.size() > 5 ? QStringLiteral("\n共 %1 条待办到期").arg(titles.size()) : QString{});
-    if (tray_.isVisible()) tray_.showMessage(QStringLiteral("待办提醒"), message, QSystemTrayIcon::Information, 10000);
+    const auto message = titles.mid(0, 5).join('\n') + (titles.size() > 5 ? QCoreApplication::translate("CrossDesk", "\n共 %1 条待办到期").arg(titles.size()) : QString{});
+    if (tray_.isVisible()) tray_.showMessage(QCoreApplication::translate("CrossDesk", "待办提醒"), message, QSystemTrayIcon::Information, 10000);
     else {
-        auto* dialog = new QMessageBox(QMessageBox::Information, QStringLiteral("待办提醒"), message, QMessageBox::Ok, this);
+        auto* dialog = new QMessageBox(QMessageBox::Information, QCoreApplication::translate("CrossDesk", "待办提醒"), message, QMessageBox::Ok, this);
         dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setWindowModality(Qt::NonModal); dialog->show();
     }
-    notify(QStringLiteral("待办到期：") + titles.join(QStringLiteral("、")));
+    notify(QCoreApplication::translate("CrossDesk", "待办到期：") + titles.join(QStringLiteral("、")));
 }
 void Workbench::restoreScreenLayout() {
     QTimer::singleShot(300, this, [this] {

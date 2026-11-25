@@ -16,17 +16,23 @@ if(CROSSDESK_BUILD_GUI)
     add_library(crossdesk_desktop STATIC
         src/desktop/store.h src/desktop/store.cpp
         src/desktop/pages.h src/desktop/pages.cpp
+        src/desktop/page_factories.h src/desktop/folder_page.cpp src/desktop/file_transfer.cpp
+        src/desktop/record_pages.cpp src/desktop/record_actions.cpp
+        src/desktop/search.cpp src/desktop/search_page.cpp
+        src/desktop/appearance.cpp src/desktop/language.cpp
+        src/desktop/utility_pages.cpp src/desktop/utility_data.cpp
         src/desktop/workbench.h src/desktop/workbench.cpp
     )
     set_target_properties(crossdesk_desktop PROPERTIES AUTOMOC ON)
     target_include_directories(crossdesk_desktop PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(crossdesk_desktop PUBLIC Qt6::Widgets Qt6::Network Qt6::Concurrent)
     if(WIN32)
-        target_sources(crossdesk_desktop PRIVATE src/platform/windows/desktop_shell.cpp src/platform/windows/global_shortcuts.cpp)
+        target_sources(crossdesk_desktop PRIVATE src/platform/windows/desktop_shell.cpp src/platform/windows/global_shortcuts.cpp
+            src/platform/windows/search_apps.cpp src/platform/windows/media_session.cpp)
         target_link_libraries(crossdesk_desktop PRIVATE user32 shell32 ole32 uuid advapi32 dwmapi)
         target_compile_definitions(crossdesk_desktop PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
     else()
-        target_sources(crossdesk_desktop PRIVATE src/desktop/shell_stub.cpp)
+        target_sources(crossdesk_desktop PRIVATE src/desktop/shell_stub.cpp src/desktop/search_apps_stub.cpp src/desktop/media_session_stub.cpp)
     endif()
     if(MSVC)
         target_compile_options(crossdesk_desktop PRIVATE /utf-8)
@@ -36,21 +42,6 @@ if(CROSSDESK_BUILD_GUI)
         src/app/main.cpp
     )
     target_link_libraries(crossdesk PRIVATE crossdesk_desktop)
-    if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
-        if(CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64)$")
-            set(CROSSDESK_EVERYTHING_DLL EverythingARM64.dll)
-        else()
-            set(CROSSDESK_EVERYTHING_DLL Everything64.dll)
-        endif()
-        add_custom_command(TARGET crossdesk POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/third_party/everything/${CROSSDESK_EVERYTHING_DLL}"
-                "$<TARGET_FILE_DIR:crossdesk>/EverythingSdk.dll"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:crossdesk>/licenses/Everything"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/third_party/everything/LICENSE.txt"
-                "$<TARGET_FILE_DIR:crossdesk>/licenses/Everything/LICENSE.txt")
-    endif()
     if(BUILD_TESTING)
         add_executable(crossdesk_desktop_store_test tests/desktop_store_test.cpp)
         target_link_libraries(crossdesk_desktop_store_test PRIVATE crossdesk_desktop)
@@ -58,6 +49,21 @@ if(CROSSDESK_BUILD_GUI)
             target_compile_options(crossdesk_desktop_store_test PRIVATE /utf-8)
         endif()
         add_test(NAME desktop_store_test COMMAND crossdesk_desktop_store_test)
+        foreach(feature files record utility search)
+            add_executable(crossdesk_${feature}_features_test tests/${feature}_features_test.cpp)
+            target_link_libraries(crossdesk_${feature}_features_test PRIVATE crossdesk_desktop)
+            if(MSVC)
+                target_compile_options(crossdesk_${feature}_features_test PRIVATE /utf-8)
+            endif()
+            add_test(NAME ${feature}_features_test COMMAND crossdesk_${feature}_features_test)
+            set_tests_properties(${feature}_features_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;CROSSDESK_OFFLINE=1" TIMEOUT 30)
+        endforeach()
+        if(WIN32)
+            add_test(NAME media_session_readonly COMMAND crossdesk_utility_features_test --media-readonly)
+            set_tests_properties(media_session_readonly PROPERTIES LABELS "interactive-desktop" TIMEOUT 20)
+            add_test(NAME application_catalog_readonly COMMAND crossdesk_search_features_test --apps-readonly)
+            set_tests_properties(application_catalog_readonly PROPERTIES LABELS "interactive-desktop" TIMEOUT 20)
+        endif()
         add_executable(crossdesk_desktop_ui_test tests/desktop_ui_test.cpp)
         target_link_libraries(crossdesk_desktop_ui_test PRIVATE crossdesk_desktop)
         if(MSVC)

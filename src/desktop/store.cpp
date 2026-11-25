@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "desktop/store.h"
 
 #include <QCryptographicHash>
@@ -32,11 +33,11 @@ bool writeJson(const QString& file, const QJsonObject& value, QString* error) {
 bool readJson(const QString& file, QJsonObject& value, QString* error) {
     QFile input(file);
     if (!input.open(QIODevice::ReadOnly)) return fail(error, input.errorString());
-    if (input.size() > 32 * 1024 * 1024) return fail(error, QStringLiteral("配置文件过大"));
+    if (input.size() > 32 * 1024 * 1024) return fail(error, QCoreApplication::translate("CrossDesk", "配置文件过大"));
     QJsonParseError parse;
     auto document = QJsonDocument::fromJson(input.readAll(), &parse);
     if (parse.error != QJsonParseError::NoError || !document.isObject())
-        return fail(error, QStringLiteral("配置文件格式无效"));
+        return fail(error, QCoreApplication::translate("CrossDesk", "配置文件格式无效"));
     value = document.object();
     return Store::validate(value, error);
 }
@@ -76,7 +77,7 @@ Store::Store(QString directory, QObject* parent)
     : QObject(parent), directory_(std::move(directory)), state_(emptyState()) {}
 bool Store::validate(const QJsonObject& state, QString* error) {
     if (state["schema"].toInt() != 1 || !state["widgets"].isArray() ||
-        !state["settings"].isObject()) return fail(error, QStringLiteral("不支持的配置版本"));
+        !state["settings"].isObject()) return fail(error, QCoreApplication::translate("CrossDesk", "不支持的配置版本"));
     QSet<QString> ids;
     const QSet<QString> kinds{"folder", "todo", "note", "clock", "weather", "music", "search"};
     for (const auto& value : state["widgets"].toArray()) {
@@ -86,32 +87,32 @@ bool Store::validate(const QJsonObject& state, QString* error) {
             !item["data"].isObject() || item["width"].toInt() < 180 ||
             item["height"].toInt() < 120 || item["width"].toInt() > 16000 ||
             item["height"].toInt() > 16000)
-            return fail(error, QStringLiteral("格子数据无效或标识重复"));
+            return fail(error, QCoreApplication::translate("CrossDesk", "格子数据无效或标识重复"));
         ids.insert(id);
     }
     for (const auto* key : {"todos", "notes", "operations"})
-        if (!state[key].isArray()) return fail(error, QStringLiteral("记录数据无效"));
+        if (!state[key].isArray()) return fail(error, QCoreApplication::translate("CrossDesk", "记录数据无效"));
     for (const auto* key : {"todos", "notes"}) {
         QSet<QString> recordIds;
         for (const auto& value : state[key].toArray()) {
             const auto record = value.toObject();
             const auto id = record["id"].toString();
             if (QUuid(id).isNull() || recordIds.contains(id) || !record["title"].isString())
-                return fail(error, QStringLiteral("记录标识或标题无效"));
+                return fail(error, QCoreApplication::translate("CrossDesk", "记录标识或标题无效"));
             recordIds.insert(id);
         }
     }
     return true;
 }
 bool Store::load(QString* error) {
-    if (!QDir().mkpath(directory_)) return fail(error, QStringLiteral("无法创建数据目录"));
+    if (!QDir().mkpath(directory_)) return fail(error, QCoreApplication::translate("CrossDesk", "无法创建数据目录"));
     const auto file = directory_ + "/workspace.json";
     if (!QFileInfo::exists(file)) return true;
     QJsonObject loaded;
     QString primaryError;
     if (!readJson(file, loaded, &primaryError)) {
         if (!readJson(file + ".bak", loaded, nullptr)) return fail(error, primaryError);
-        emit persistenceFailed(QStringLiteral("主配置损坏，已读取上一次备份"));
+        emit persistenceFailed(QCoreApplication::translate("CrossDesk", "主配置损坏，已读取上一次备份"));
     }
     state_ = loaded;
     emit changed();
@@ -121,7 +122,7 @@ bool Store::save(QString* error) { return commit(state_, error); }
 bool Store::commit(const QJsonObject& next, QString* error) {
     QString reason;
     if (!validate(next, &reason) || !QDir().mkpath(directory_)) {
-        if (reason.isEmpty()) reason = QStringLiteral("无法创建数据目录");
+        if (reason.isEmpty()) reason = QCoreApplication::translate("CrossDesk", "无法创建数据目录");
         emit persistenceFailed(reason);
         return fail(error, reason);
     }
@@ -163,7 +164,7 @@ bool Store::putWidget(const QJsonObject& widget, QString* error) {
             return commit(next, error);
         }
     }
-    return fail(error, QStringLiteral("格子已不存在"));
+    return fail(error, QCoreApplication::translate("CrossDesk", "格子已不存在"));
 }
 bool Store::removeWidget(const QString& id) {
     auto list = widgets();
@@ -209,9 +210,9 @@ bool Store::exportBackup(const QString& file, QString* error) const {
         QDirIterator files(base, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden, QDirIterator::Subdirectories);
         while (files.hasNext()) {
             const auto path = files.next(); const auto info = files.fileInfo();
-            if (info.isSymLink()) return fail(error, QStringLiteral("备份附件中存在符号链接"));
+            if (info.isSymLink()) return fail(error, QCoreApplication::translate("CrossDesk", "备份附件中存在符号链接"));
             total += info.size();
-            if (total > 16 * 1024 * 1024) return fail(error, QStringLiteral("此便携备份的附件上限为 16 MB，请单独备份较大的附件目录"));
+            if (total > 16 * 1024 * 1024) return fail(error, QCoreApplication::translate("CrossDesk", "此便携备份的附件上限为 16 MB，请单独备份较大的附件目录"));
             QFile input(path); if (!input.open(QIODevice::ReadOnly)) return fail(error, input.errorString());
             const auto bytes = input.readAll();
             assets.append(QJsonObject{{"path", QDir(directory_).relativeFilePath(path)},
@@ -220,7 +221,7 @@ bool Store::exportBackup(const QString& file, QString* error) const {
         }
     }
     backup["backupAssets"] = assets; backup["backupRoot"] = QFileInfo(directory_).absoluteFilePath();
-    if (QJsonDocument(backup).toJson().size() > 32 * 1024 * 1024) return fail(error, QStringLiteral("备份超过 32 MB 上限"));
+    if (QJsonDocument(backup).toJson().size() > 32 * 1024 * 1024) return fail(error, QCoreApplication::translate("CrossDesk", "备份超过 32 MB 上限"));
     return writeJson(file, backup, error);
 }
 bool Store::importBackup(const QString& file, QString* error) {
@@ -233,12 +234,12 @@ bool Store::importBackup(const QString& file, QString* error) {
         const auto clean = QDir::cleanPath(path);
         if (!path.startsWith("attachments/") || clean != path || path.contains('\\') ||
             path.contains(':') || path.contains("/../") || decoded.contains(path))
-            return fail(error, QStringLiteral("备份附件路径无效"));
+            return fail(error, QCoreApplication::translate("CrossDesk", "备份附件路径无效"));
         const auto result = QByteArray::fromBase64Encoding(asset["base64"].toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
         if (result.decodingStatus != QByteArray::Base64DecodingStatus::Ok ||
             QCryptographicHash::hash(result.decoded, QCryptographicHash::Sha256).toHex() != asset["sha256"].toString().toLatin1())
-            return fail(error, QStringLiteral("备份附件校验失败"));
-        total += result.decoded.size(); if (total > 16 * 1024 * 1024) return fail(error, QStringLiteral("备份附件过大"));
+            return fail(error, QCoreApplication::translate("CrossDesk", "备份附件校验失败"));
+        total += result.decoded.size(); if (total > 16 * 1024 * 1024) return fail(error, QCoreApplication::translate("CrossDesk", "备份附件过大"));
         decoded[path] = result.decoded;
     }
     const auto targetRoot = directory_ + "/attachments/restored-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -246,10 +247,10 @@ bool Store::importBackup(const QString& file, QString* error) {
     QMap<QString, QString> paths;
     for (auto it = decoded.cbegin(); it != decoded.cend(); ++it) {
         const auto target = targetRoot + '/' + it.key().mid(QString("attachments/").size());
-        if (!QDir().mkpath(QFileInfo(target).absolutePath())) return fail(error, QStringLiteral("无法恢复附件目录"));
+        if (!QDir().mkpath(QFileInfo(target).absolutePath())) return fail(error, QCoreApplication::translate("CrossDesk", "无法恢复附件目录"));
         QSaveFile output(target);
         if (!output.open(QIODevice::WriteOnly) || output.write(it.value()) != it.value().size() || !output.commit())
-            return fail(error, QStringLiteral("附件恢复失败，原配置已保留"));
+            return fail(error, QCoreApplication::translate("CrossDesk", "附件恢复失败，原配置已保留"));
         paths[originalRoot + '/' + it.key()] = target;
     }
     std::function<QJsonValue(const QJsonValue&)> rebase = [&](const QJsonValue& value) -> QJsonValue {
@@ -271,13 +272,13 @@ bool Store::importBackup(const QString& file, QString* error) {
 FileResult copyPath(const QString& source, const QString& destination) {
     QFileInfo input(source);
     if (!input.exists() || input.isSymLink())
-        return {false, QStringLiteral("来源不存在或是符号链接"), destination};
+        return {false, QCoreApplication::translate("CrossDesk", "来源不存在或是符号链接"), destination};
     if (inside(normalized(destination), normalized(source)))
-        return {false, QStringLiteral("不能复制到自身或自己的子目录"), destination};
+        return {false, QCoreApplication::translate("CrossDesk", "不能复制到自身或自己的子目录"), destination};
     if (QFileInfo::exists(destination))
-        return {false, QStringLiteral("目标已存在，未覆盖"), destination};
+        return {false, QCoreApplication::translate("CrossDesk", "目标已存在，未覆盖"), destination};
     if (input.isDir()) {
-        if (!QDir().mkpath(destination)) return {false, QStringLiteral("无法创建目标目录"), destination};
+        if (!QDir().mkpath(destination)) return {false, QCoreApplication::translate("CrossDesk", "无法创建目标目录"), destination};
         for (const auto& child : QDir(source).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden)) {
             auto result = copyPath(child.absoluteFilePath(), destination + '/' + child.fileName());
             if (!result.ok) return result; // Preserve both source and completed destination files.
@@ -287,7 +288,7 @@ FileResult copyPath(const QString& source, const QString& destination) {
     QFile read(source);
     QTemporaryFile write(destination + ".XXXXXX");
     if (!read.open(QIODevice::ReadOnly) || !write.open())
-        return {false, QStringLiteral("无法打开来源或目标文件"), destination};
+        return {false, QCoreApplication::translate("CrossDesk", "无法打开来源或目标文件"), destination};
     QCryptographicHash sourceHash(QCryptographicHash::Sha256);
     while (!read.atEnd()) {
         const auto bytes = read.read(1024 * 1024);
@@ -299,33 +300,33 @@ FileResult copyPath(const QString& source, const QString& destination) {
     if (!write.flush()) return {false, write.errorString(), destination};
     QCryptographicHash targetHash(QCryptographicHash::Sha256);
     if (!write.seek(0) || !targetHash.addData(&write))
-        return {false, QStringLiteral("无法校验临时副本"), destination};
+        return {false, QCoreApplication::translate("CrossDesk", "无法校验临时副本"), destination};
     if (sourceHash.result() != targetHash.result())
-        return {false, QStringLiteral("复制校验失败，来源已保留"), destination};
+        return {false, QCoreApplication::translate("CrossDesk", "复制校验失败，来源已保留"), destination};
     write.close();
     // Refuse replacement even if the target appeared during the copy.
     if (!write.rename(destination))
-        return {false, QStringLiteral("无法提交副本，目标可能已存在"), destination};
+        return {false, QCoreApplication::translate("CrossDesk", "无法提交副本，目标可能已存在"), destination};
     write.setAutoRemove(false);
     return {true, {}, destination};
 }
 FileResult movePath(const QString& source, const QString& destination) {
     if (QFileInfo::exists(destination) || inside(normalized(destination), normalized(source)))
-        return {false, QStringLiteral("目标已存在或位于来源内部"), destination};
+        return {false, QCoreApplication::translate("CrossDesk", "目标已存在或位于来源内部"), destination};
     const bool ok = QFileInfo(source).isDir() ? QDir().rename(source, destination)
                                             : QFile::rename(source, destination);
-    return {ok, ok ? QString{} : QStringLiteral("移动失败；来源未被删除"), destination};
+    return {ok, ok ? QString{} : QCoreApplication::translate("CrossDesk", "移动失败；来源未被删除"), destination};
 }
 QString categoryFor(const QString& path) {
-    if (QFileInfo(path).isDir()) return QStringLiteral("文件夹");
+    if (QFileInfo(path).isDir()) return QCoreApplication::translate("CrossDesk", "文件夹");
     const auto ext = QFileInfo(path).suffix().toLower();
-    for (const auto& pair : {qMakePair(QStringLiteral("图片"), QStringLiteral("png jpg jpeg webp gif bmp svg")),
-                            qMakePair(QStringLiteral("文档"), QStringLiteral("pdf doc docx txt md xls xlsx ppt pptx")),
-                            qMakePair(QStringLiteral("影音"), QStringLiteral("mp4 mkv avi mp3 wav flac m4a")),
-                            qMakePair(QStringLiteral("压缩包"), QStringLiteral("zip 7z rar tar gz")),
-                            qMakePair(QStringLiteral("快捷方式"), QStringLiteral("lnk url"))})
+    for (const auto& pair : {qMakePair(QCoreApplication::translate("CrossDesk", "图片"), QStringLiteral("png jpg jpeg webp gif bmp svg")),
+                            qMakePair(QCoreApplication::translate("CrossDesk", "文档"), QStringLiteral("pdf doc docx txt md xls xlsx ppt pptx")),
+                            qMakePair(QCoreApplication::translate("CrossDesk", "影音"), QStringLiteral("mp4 mkv avi mp3 wav flac m4a")),
+                            qMakePair(QCoreApplication::translate("CrossDesk", "压缩包"), QStringLiteral("zip 7z rar tar gz")),
+                            qMakePair(QCoreApplication::translate("CrossDesk", "快捷方式"), QStringLiteral("lnk url"))})
         if (pair.second.split(' ').contains(ext)) return pair.first;
-    return QStringLiteral("其他");
+    return QCoreApplication::translate("CrossDesk", "其他");
 }
 bool recordMove(Store& store, const QString& source, const QString& destination) {
     auto operations = store.records("operations");

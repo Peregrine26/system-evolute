@@ -14,6 +14,5 @@ bool mediaKey(const QString& command);
 int systemVolume();
 bool setSystemVolume(int value);
 bool setAutoStart(bool enabled, const QString& executable, QString* error);
-QStringList everythingSearch(const QString& query, QString* error);
 QString lunarDate(const QDate& date);
 }

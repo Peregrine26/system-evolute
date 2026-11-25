@@ -1,6 +1,7 @@
 #include <QApplication>
 #include "desktop/store.h"
 #include "desktop/workbench.h"
+#include "desktop/language.h"
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFile>
@@ -64,6 +65,7 @@ int main(int argc, char* argv[]) {
     crossdesk::desktop::Store store(directory);
     QString error;
     if (!store.load(&error)) { QMessageBox::critical(nullptr, QStringLiteral("无法读取配置"), error); return 1; }
+    crossdesk::desktop::initializeLanguage(store.settings()["language"].toString("zh_CN"));
     if (smoke) {
         if (!sandbox.isValid()) return 1;
         QDir().mkpath(sandbox.path() + "/files");
