@@ -33,6 +33,8 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QStyledItemDelegate>
+#include <QStyle>
 #include <QSlider>
 #include <QSplitter>
 #include <QStandardPaths>
@@ -63,6 +65,26 @@ QIcon colorIcon(const QString& value) {
     QPixmap pixmap(14, 14); pixmap.fill(Qt::transparent); QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing); painter.setPen(Qt::NoPen); painter.setBrush(QColor(value)); painter.drawEllipse(2, 2, 10, 10); return QIcon(pixmap);
 }
+class TaskDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QStyleOptionViewItem view(option); initStyleOption(&view, index);
+        auto* style = view.widget ? view.widget->style() : QApplication::style();
+        auto text = style->subElementRect(QStyle::SE_ItemViewItemText, &view, view.widget);
+        const auto check = style->subElementRect(QStyle::SE_ItemViewItemCheckIndicator, &view, view.widget);
+        const auto icon = style->subElementRect(QStyle::SE_ItemViewItemDecoration, &view, view.widget);
+        if (view.features.testFlag(QStyleOptionViewItem::HasCheckIndicator)) text.setLeft(qMax(text.left(), check.right() + 8));
+        if (!view.icon.isNull()) text.setLeft(qMax(text.left(), icon.right() + 8));
+        auto background = view; background.text.clear();
+        painter->save(); style->drawControl(QStyle::CE_ItemViewItem, &background, painter, view.widget);
+        painter->setFont(view.font);
+        style->drawItemText(painter, text, Qt::AlignLeft | Qt::AlignVCenter, view.palette,
+            view.state.testFlag(QStyle::State_Enabled), view.text,
+            view.state.testFlag(QStyle::State_Selected) ? QPalette::HighlightedText : QPalette::Text);
+        painter->restore();
+    }
+};
 class RecordPane final : public QWidget {
 public:
     RecordPane(Store& store, QString key, QWidget* list, QWidget* detail)
@@ -147,6 +169,7 @@ public:
         filter_->setObjectName("todoFilter"); layout->addWidget(filter_);
         search_ = new QLineEdit; search_->setObjectName("todoTextFilter"); search_->setPlaceholderText(QCoreApplication::translate("CrossDesk", "筛选标题或备注")); layout->addWidget(search_);
         list_ = new QListWidget; list_->setObjectName("todoList"); list_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        list_->setItemDelegate(new TaskDelegate(list_));
         detail_ = new QTextBrowser; detail_->setObjectName("todoMarkdownPreview"); detail_->setOpenExternalLinks(true);
         pane_ = new RecordPane(store_, "todo", list_, detail_); layout->addWidget(pane_, 1);
         auto* actions = new QHBoxLayout;
